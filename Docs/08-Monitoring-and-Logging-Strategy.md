@@ -1,0 +1,502 @@
+# Monitoring & Logging Strategy
+
+## Project Title
+
+CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda, and AWS Systems Manager
+
+---
+
+# Document Information
+
+| Item | Details |
+|------|----------|
+| Document Name | Monitoring & Logging Strategy |
+| Project | CloudOps NOC Automation |
+| Version | 1.0 |
+| Prepared By | Smart Sujith |
+| Date | July 2026 |
+
+---
+
+# 1. Purpose
+
+This document describes the monitoring and logging strategy implemented for the CloudOps NOC Automation solution. The objective is to provide continuous infrastructure monitoring, proactive alerting, centralized log collection, and automated incident response using AWS managed services.
+
+The monitoring solution enables the operations team to detect system failures quickly, minimize downtime, and improve service availability.
+
+---
+
+# 2. Monitoring Objectives
+
+The monitoring solution is designed to achieve the following objectives:
+
+- Continuously monitor EC2 instance health.
+- Monitor Apache (httpd) service availability.
+- Collect operating system performance metrics.
+- Generate alerts when thresholds are exceeded.
+- Automatically remediate service failures.
+- Maintain centralized logs for troubleshooting.
+- Provide operational visibility through dashboards.
+
+---
+
+# 3. Monitoring Architecture
+
+The monitoring workflow is implemented using AWS native services.
+
+```
+EC2 Instance
+      │
+      ▼
+CloudWatch Agent
+      │
+      ▼
+Amazon CloudWatch Metrics
+      │
+      ▼
+CloudWatch Dashboard
+      │
+      ▼
+CloudWatch Alarm
+      │
+      ▼
+Amazon SNS
+      │
+      ▼
+AWS Lambda
+      │
+      ▼
+AWS Systems Manager
+      │
+      ▼
+Restart Apache Service
+      │
+      ▼
+Success Notification Email
+```
+
+---
+
+# 4. Monitoring Components
+
+| AWS Service | Purpose |
+|-------------|----------|
+| CloudWatch Agent | Collect system metrics |
+| Amazon CloudWatch | Store and analyze metrics |
+| CloudWatch Dashboard | Visual monitoring |
+| CloudWatch Alarm | Detect failures |
+| Amazon SNS | Send notifications |
+| AWS Lambda | Execute remediation |
+| AWS Systems Manager | Restart Apache service |
+| CloudWatch Logs | Store service logs |
+
+---
+
+# 5. CloudWatch Agent Configuration
+
+The Amazon CloudWatch Agent is installed on the EC2 instance to collect operating system metrics.
+
+### Agent Status
+
+Running
+
+### Configuration Location
+
+```
+/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/file_file_amazon-cloudwatch-agent.json
+```
+
+### Metrics Collection Interval
+
+60 Seconds
+
+---
+
+# 6. Metrics Collected
+
+The CloudWatch Agent collects the following metrics.
+
+## CPU Metrics
+
+- CPU Utilization
+- CPU Idle Time
+- CPU System Time
+- CPU User Time
+
+Purpose
+
+Monitor processor utilization and identify resource bottlenecks.
+
+---
+
+## Memory Metrics
+
+- Memory Used
+- Memory Available
+- Memory Utilization
+
+Purpose
+
+Track memory consumption and detect memory exhaustion.
+
+---
+
+## Disk Metrics
+
+- Disk Used Percentage
+- Disk Free Space
+- Disk I/O Read Operations
+- Disk I/O Write Operations
+
+Purpose
+
+Monitor storage capacity and disk performance.
+
+---
+
+## Network Metrics
+
+Network Interface
+
+```
+ens5
+```
+
+Metrics
+
+- Bytes Received
+- Bytes Sent
+- Packets Received
+- Packets Sent
+
+Purpose
+
+Measure network traffic and identify abnormal activity.
+
+---
+
+## Apache Process Monitoring
+
+Service
+
+```
+httpd
+```
+
+Metric
+
+Process Count
+
+Purpose
+
+Determine whether the Apache service is running.
+
+If the process count becomes zero, CloudWatch generates an alarm.
+
+---
+
+# 7. CloudWatch Dashboard
+
+Dashboard Name
+
+```
+cloudops-NOC-dashboard
+```
+
+The dashboard provides a centralized operational view of the EC2 instance.
+
+### Dashboard Widgets
+
+- CPU Utilization
+- Memory Utilization
+- Disk Utilization
+- Network Traffic
+- Apache Process Count
+
+Benefits
+
+- Real-time infrastructure monitoring.
+- Quick identification of performance issues.
+- Centralized operational visibility.
+
+---
+
+# 8. CloudWatch Alarms
+
+Two CloudWatch alarms are configured.
+
+## Alarm 1
+
+| Property | Value |
+|----------|-------|
+| Alarm Name | NOC-cloudops-automate |
+| Metric | Apache Process Count |
+| Threshold | Process Count = 0 |
+| Action | Publish SNS Notification |
+
+Purpose
+
+Detect Apache service failure.
+
+---
+
+## Alarm 2
+
+| Property | Value |
+|----------|-------|
+| Alarm Name | cloudops-cpuutilization |
+| Metric | CPU Utilization |
+| Threshold | Configured CPU Limit |
+| Action | Notification |
+
+Purpose
+
+Monitor high CPU usage.
+
+---
+
+# 9. Alerting Strategy
+
+When CloudWatch detects a threshold violation:
+
+1. Alarm enters ALARM state.
+2. Amazon SNS receives the event.
+3. SNS triggers AWS Lambda.
+4. Lambda executes Systems Manager Run Command.
+5. Apache service is restarted.
+6. Lambda verifies the service status.
+7. SNS sends a success notification email.
+
+This workflow removes the need for manual intervention.
+
+---
+
+# 10. Logging Strategy
+
+Logging is implemented at multiple levels to support monitoring, troubleshooting, and auditing.
+
+---
+
+## CloudWatch Logs
+
+CloudWatch stores logs generated by AWS services.
+
+Used for:
+
+- Lambda execution logs
+- CloudWatch Agent logs
+- Operational monitoring
+
+---
+
+## Lambda Logs
+
+Every Lambda execution generates logs including:
+
+- Event received
+- Command execution
+- SSM response
+- Restart status
+- Success or failure message
+
+These logs help identify issues within the automation workflow.
+
+---
+
+## Systems Manager Logs
+
+The SSM Agent records:
+
+- Command execution
+- Session information
+- Managed node communication
+- Agent health
+
+Default Location
+
+```
+/var/log/amazon/ssm/
+```
+
+---
+
+## CloudWatch Agent Logs
+
+The CloudWatch Agent records:
+
+- Agent startup
+- Configuration loading
+- Metric collection
+- Communication with CloudWatch
+
+Default Location
+
+```
+/opt/aws/amazon-cloudwatch-agent/logs/
+```
+
+---
+
+## Operating System Logs
+
+System logs are available for troubleshooting operating system events.
+
+Common Log Location
+
+```
+/var/log/messages
+```
+
+---
+
+# 11. Notification Strategy
+
+Amazon SNS is responsible for delivering operational notifications.
+
+Topic
+
+```
+cloudops-sns
+```
+
+Display Name
+
+```
+NOC-topic
+```
+
+Recipients
+
+- AWS Lambda
+- NOC Engineer Email
+
+Example Notification
+
+```
+NOC AUTO REMEDIATION - SUCCESS
+
+Instance : i-0b7d483631875bb1c
+
+Service : httpd
+
+Action : systemctl restart httpd
+
+Result : Apache is now ACTIVE
+
+Incident resolved automatically.
+```
+
+---
+
+# 12. Operational Monitoring Workflow
+
+```
+Apache Running
+
+↓
+
+CloudWatch Agent
+
+↓
+
+CloudWatch Metrics
+
+↓
+
+Dashboard Updated
+
+↓
+
+Alarm Evaluation
+
+↓
+
+Apache Stops
+
+↓
+
+Alarm Triggered
+
+↓
+
+SNS Notification
+
+↓
+
+Lambda Execution
+
+↓
+
+SSM Run Command
+
+↓
+
+Apache Restarted
+
+↓
+
+Verification Completed
+
+↓
+
+Success Email Sent
+```
+
+---
+
+# 13. Troubleshooting Strategy
+
+If monitoring issues occur, the following components should be verified.
+
+| Component | Verification |
+|-----------|--------------|
+| EC2 Instance | Running |
+| Apache Service | Active |
+| CloudWatch Agent | Running |
+| SSM Agent | Running |
+| IAM Role | Attached |
+| Dashboard | Receiving Metrics |
+| Alarm | Correct Threshold |
+| SNS Topic | Subscription Confirmed |
+| Lambda Function | Successful Execution |
+| Managed Node | Online |
+
+---
+
+# 14. Monitoring Benefits
+
+The implemented monitoring strategy provides:
+
+- Continuous infrastructure monitoring.
+- Real-time dashboard visualization.
+- Automatic failure detection.
+- Immediate notification.
+- Automatic remediation.
+- Reduced Mean Time to Recovery (MTTR).
+- Centralized operational logging.
+- Improved service availability.
+
+---
+
+# 15. Best Practices Implemented
+
+The monitoring solution follows AWS operational best practices.
+
+- Native AWS monitoring services.
+- Centralized metrics collection.
+- Centralized logging.
+- Automated alerting.
+- Event-driven remediation.
+- Infrastructure health visibility.
+- Continuous service monitoring.
+- Operational audit capability.
+
+---
+
+# 16. Conclusion
+
+The Monitoring and Logging Strategy provides complete operational visibility for the CloudOps NOC Automation solution. Amazon CloudWatch continuously monitors system health and application availability, while CloudWatch Dashboards present real-time operational metrics.
+
+CloudWatch Alarms detect failures and trigger automated remediation through Amazon SNS, AWS Lambda, and AWS Systems Manager. Centralized logging supports troubleshooting and auditing, ensuring that incidents can be investigated efficiently.
+
+This strategy reduces manual operational effort, improves infrastructure reliability, and enables faster recovery from service failures while following AWS operational best practices.

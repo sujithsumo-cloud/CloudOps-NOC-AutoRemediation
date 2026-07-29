@@ -1,0 +1,10 @@
+# Requirements
+
+# No external Python packages are required.
+
+# AWS Lambda Python runtime already includes:
+# - boto3
+# - botocore
+
+# If additional libraries are added in the future,
+# list them below.

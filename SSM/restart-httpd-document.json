@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Restart Apache Web Server",
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "RestartApache",
+      "inputs": {
+        "runCommand": [
+          "sudo systemctl restart httpd",
+          "sudo systemctl status httpd"
+        ]
+      }
+    }
+  ]
+}
