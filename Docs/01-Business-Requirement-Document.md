@@ -7,7 +7,7 @@
 | Document Name | Business Requirement Document (BRD) |
 | Version | 1.0 |
 | Project Type | AWS Cloud Infrastructure Automation |
-| Prepared By | Smart Sujith |
+| Prepared By | Sujith |
 | Date | July 2026 |
 | Status | Final |
 
