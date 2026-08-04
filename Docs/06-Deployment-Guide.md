@@ -13,7 +13,7 @@ CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda, and AWS Systems Manag
 | Document Name | Deployment Guide (SOP) |
 | Project | CloudOps NOC Automation |
 | Version | 1.0 |
-| Prepared By | Smart Sujith |
+| Prepared By | Sujith |
 | Date | July 2026 |
 
 ---
@@ -196,7 +196,7 @@ Configuration
 | Property | Value |
 |----------|-------|
 | AMI | Amazon Linux 2023 |
-| Instance Type | t2.micro |
+| Instance Type | t3.micro |
 | IAM Role | cloudops-EC2-inline-role |
 | Security Group | cloudops-sg |
 
