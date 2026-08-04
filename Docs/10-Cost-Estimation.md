@@ -51,7 +51,7 @@ The following AWS services are included in this project.
 
 Configuration
 
-- Instance Type: t2.micro
+- Instance Type: t3.micro
 - Operating System: Amazon Linux 2023
 - Usage: 730 Hours per Month
 
