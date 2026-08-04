@@ -13,7 +13,7 @@ CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda and Systems Manager
 | Document Name | Low-Level Design (LLD) |
 | Project | CloudOps NOC Automation |
 | Version | 1.0 |
-| Prepared By | Smart Sujith |
+| Prepared By | Sujith |
 | Date | July 2026 |
 | Environment | AWS Cloud |
 
@@ -34,7 +34,7 @@ The objective is to provide all technical details required for deployment, maint
 | AWS Account | 257074875139 |
 | Region | ap-south-1 |
 | Operating System | Amazon Linux 2023 |
-| Instance Type | t2.micro |
+| Instance Type | t3.micro |
 | Architecture | x86_64 |
 | Availability Zone | ap-south-1 |
 
