@@ -24,7 +24,7 @@ The EC2 instance is responsible for:
 | Property | Value |
 |----------|-------|
 | Operating System | Amazon Linux 2023 |
-| Instance Type | t2.micro |
+| Instance Type | t3.micro |
 | Web Server | Apache HTTP Server |
 | Monitoring | CloudWatch Agent |
 | Remote Management | AWS Systems Manager Agent |
