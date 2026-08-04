@@ -36,6 +36,20 @@ CloudWatch Alarm
                   ▼
       Restart Apache Service
 
+
+
+
+
+
+
+
+
+
+
+
+
+      
+
 ---
 
 # Components Used
