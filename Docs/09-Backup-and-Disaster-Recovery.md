@@ -13,7 +13,7 @@ CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda, and AWS Systems Manag
 | Document Name | Backup & Disaster Recovery Plan (BDR) |
 | Project | CloudOps NOC Automation |
 | Version | 1.0 |
-| Prepared By | Smart Sujith |
+| Prepared By | Sujith |
 | Date | July 2026 |
 
 ---
