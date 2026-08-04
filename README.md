@@ -111,16 +111,18 @@ The objective of this project is to minimize downtime, reduce manual interventio
 ```text
 CloudOps-NOC-Auto-Remediation/
 │
+├── ec2/
+├── vpc/
 ├── apache/
 ├── cloudwatch/
 ├── sns/
 ├── lambda/
 ├── ssm/
 ├── iam/
-├── architecture/
 ├── diagrams/
 ├── scripts/
 ├── screenshots/
+├── Docs/
 │
 ├── README.md
 ├── LICENSE
@@ -236,17 +238,18 @@ This project helped develop practical knowledge of:
 - AWS Certificate Manager (ACM)
 - Application Load Balancer (ALB)
 - Auto Scaling Group
-- Multi-AZ deployment
 - Amazon EventBridge integration
 - AWS Config compliance monitoring
-- AWS X-Ray tracing
 - Infrastructure as Code (Terraform)
+- Prometheus & Grafana
+- Nginx (web server)
+- Docker
 
 ---
 
 # 👨‍💻 Author
 
-**Smart Sujith**
+**Sujith**
 
 Cloud & DevOps Engineer (Learning)
 
