@@ -206,14 +206,4 @@ Apache Restart
 - Retain monitoring data according to organizational requirements.
 - Validate alarm actions periodically.
 
----
-
-# Repository Files
-
-| File | Description |
-|------|-------------|
-| dashboard.json | Exported CloudWatch dashboard |
-| cloudwatch-agent-config.json | CloudWatch Agent configuration |
-| alarm-configuration.md | Alarm configuration details |
-| metrics.md | Metrics explanation |
-| screenshots/ | CloudWatch console screenshots |
+--
