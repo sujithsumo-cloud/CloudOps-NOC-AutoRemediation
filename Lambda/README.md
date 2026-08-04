@@ -158,14 +158,4 @@ The Lambda function should:
 - Monitor CloudWatch Logs.
 - Keep functions lightweight and focused.
 
----
-
-# Repository Files
-
-| File | Description |
-|------|-------------|
-| lambda_function.py | Lambda source code |
-| requirements.txt | Python dependencies |
-| environment-variables.md | Environment variable documentation |
-| lambda-execution-flow.md | Lambda execution workflow |
-| screenshots/ | AWS Lambda console screenshots |
+--
