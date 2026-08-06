@@ -103,7 +103,7 @@ Create a public subnet inside the VPC.
 | Property | Value |
 |----------|-------|
 | Name | cloudops-subnet |
-| CIDR | 10.0.1.0/24 |
+| CIDR | 10.0.0.0/28 |
 
 Expected Result
 
