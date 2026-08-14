@@ -706,38 +706,7 @@ Check:
 
 ---
 
-# 22. Repository Structure
-
-Recommended CloudWatch documentation and configuration structure:
-
-```text
-cloudwatch/
-│
-├── README.md
-│
-├── agent/
-│   ├── cloudwatch-agent-config.json
-│   ├── install-cloudwatch-agent.sh
-│   ├── start-cloudwatch-agent.sh
-│   └── verify-cloudwatch-agent.sh
-│
-├── alarms/
-│   ├── p1-httpd-alarm.json
-│   └── p2-cpu-alarm.json
-│
-├── dashboard/
-│   └── cloudops-noc-dashboard.json
-│
-├── metrics/
-│   └── monitored-metrics.md
-│
-└── troubleshooting/
-    └── cloudwatch-troubleshooting.md
-```
-
----
-
-# 23. Project Role Summary
+# 22. Project Role Summary
 
 Amazon CloudWatch is the **monitoring and detection engine** of the CloudOps NOC Automation project.
 
@@ -767,7 +736,7 @@ P2 → High CPU      → SNS → NOC Notification
 
 ---
 
-# 24. Final Summary
+# 23. Final Summary
 
 Amazon CloudWatch provides the monitoring foundation for the CloudOps NOC Automation solution.
 
