@@ -1,418 +1,564 @@
-# Security Architecture
+# Document 7 – Security Architecture
 
 ## Project Title
 
-CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda, and AWS Systems Manager
+CloudOps NOC Automation Using AWS CloudWatch, Amazon SNS, AWS Lambda, and AWS Systems Manager
 
 ---
 
 # Document Information
 
 | Item | Details |
-|------|----------|
+|---|---|
 | Document Name | Security Architecture |
 | Project | CloudOps NOC Automation |
 | Version | 1.0 |
 | Prepared By | Sujith |
-| Date | July 2026 |
+| Date | August 2026 |
+| Environment | AWS Cloud |
+| Region | ap-south-1 (Mumbai) |
 
 ---
 
 # 1. Purpose
 
-This document describes the security architecture implemented for the CloudOps NOC Automation solution. It explains how AWS security services and best practices are used to protect infrastructure, control access, secure communication, and maintain operational integrity.
+This document defines the security architecture for the CloudOps NOC Automation solution.
 
-The objective is to ensure that only authorized users and AWS services can access project resources while reducing security risks.
+The security design protects the AWS infrastructure, controls access between users and AWS services, secures the EC2 management path, and protects the automated incident-response workflow.
+
+The architecture supports two finalized operational workflows:
+
+- **P1 – Critical:** Apache HTTP Server failure with automatic remediation.
+- **P2 – High:** CPU utilization above 50% with diagnostic collection and manual review.
+
+The security controls are designed to ensure that automation operates only on authorized resources and that no unnecessary automatic action is performed for P2 incidents.
 
 ---
 
 # 2. Security Objectives
 
-The security architecture is designed to achieve the following objectives:
+The security architecture is designed to:
 
 - Protect AWS resources from unauthorized access.
-- Implement secure communication between AWS services.
 - Apply the Principle of Least Privilege.
-- Secure management of the EC2 instance.
-- Enable monitoring and auditing of system activities.
-- Protect automation workflows from unauthorized execution.
+- Use IAM roles instead of long-term access keys.
+- Secure EC2 management through AWS Systems Manager.
+- Restrict network access through Security Groups.
+- Authenticate AWS service-to-service communication.
+- Maintain operational logs for troubleshooting and auditing.
+- Restrict Lambda automation to supported NOC workflows.
+- Prevent unsupported alarms from triggering operational remediation.
+- Maintain a clear separation between P1 remediation and P2 diagnostics.
 
 ---
 
 # 3. Security Architecture Overview
 
-The solution uses AWS Identity and Access Management (IAM), Security Groups, Systems Manager, CloudWatch, and Lambda to provide a secure automation environment.
+The solution uses multiple AWS security controls across the infrastructure and automation layers.
 
-Main security layers include:
+The primary security layers are:
 
-- Identity Security
-- Network Security
-- Instance Security
-- Monitoring Security
-- Automation Security
-- Logging and Auditing
+1. Identity and Access Management
+2. Network Security
+3. EC2 Security
+4. Systems Manager Security
+5. Lambda Security
+6. SNS Security
+7. CloudWatch Security
+8. Logging and Auditing
+9. Automation Authorization
+10. Credential Management
 
 ---
 
 # 4. Identity and Access Management (IAM)
 
-## IAM Role
+IAM provides authentication and authorization for AWS resources and services.
+
+## 4.1 EC2 IAM Role
 
 | Property | Value |
-|----------|-------|
-| Role Name | cloudops-EC2-inline-role |
-| Attachment Type | Instance Profile |
-| Attached To | EC2 Instance |
+|---|---|
+| Role Name | `cloudops-EC2-inline-role` |
+| Attached To | `cloudops-server` |
+| Policy Type | Custom Inline Policy |
 
-### Purpose
+The EC2 role provides the permissions required for the instance to communicate with AWS monitoring and management services.
 
-The IAM role allows the EC2 instance to securely communicate with AWS services without storing AWS access keys on the server.
+### Required Access Areas
 
-### Permissions Granted
-
-The custom inline policy provides access to:
-
-- Amazon CloudWatch
+- CloudWatch metrics
 - CloudWatch Logs
-- Amazon Systems Manager (SSM)
-- EC2 Describe APIs
-- Amazon SNS (through Lambda workflow)
+- Systems Manager
+- EC2 Describe operations
+- Other AWS APIs required by the implemented monitoring configuration
 
-### Security Benefits
+The actual permissions should remain limited to the operations required by the project.
 
-- No hardcoded credentials.
-- Temporary AWS credentials from Instance Metadata Service (IMDSv2).
-- Reduced risk of credential exposure.
-- Centralized permission management.
+## 4.2 Lambda Execution Role
+
+The Lambda function uses an IAM execution role to access AWS services.
+
+Required access areas include:
+
+- Systems Manager Run Command
+- Amazon SNS publishing
+- CloudWatch Logs
+- Required EC2 identification/describe operations
+
+Lambda does not use hardcoded AWS credentials.
+
+## 4.3 Least Privilege
+
+IAM permissions should be restricted to the resources and actions required by each workflow.
+
+The Lambda function is authorized to perform the operational actions required by the finalized project:
+
+- P1: execute the Apache recovery workflow.
+- P2: execute diagnostic collection only.
+
+P2 does not receive permission or workflow logic for destructive or automatic recovery actions.
 
 ---
 
 # 5. Network Security
 
-## Virtual Private Cloud (VPC)
+## 5.1 VPC
 
 | Property | Value |
-|----------|-------|
-| VPC Name | cloudops-vpc |
-| CIDR Block | 10.0.0.0/16 |
+|---|---|
+| VPC Name | `cloudops-vpc` |
+| CIDR Block | `10.0.0.0/16` |
 
-The VPC provides logical isolation for all project resources.
+The VPC provides network isolation for the project infrastructure.
 
----
-
-## Public Subnet
+## 5.2 Public Subnet
 
 | Property | Value |
-|----------|-------|
-| Name | cloudops-subnet |
+|---|---|
+| Subnet Name | `cloudops-subnet` |
 | Type | Public |
+| CIDR | `10.0.0.0/28` |
 
-The EC2 instance is deployed inside the public subnet with controlled access through Security Groups.
+The EC2 instance is deployed in the project subnet.
 
----
+## 5.3 Internet Gateway
 
-## Security Group
+| Property | Value |
+|---|---|
+| Name | `cloudops-igw` |
 
-Security Group Name
+The Internet Gateway provides internet connectivity for the public subnet.
 
-cloudops-sg
+## 5.4 Route Table
+
+The public subnet uses a route to the Internet Gateway.
+
+| Destination | Target |
+|---|---|
+| `0.0.0.0/0` | `cloudops-igw` |
+
+## 5.5 Security Group
+
+**Security Group:** `cloudops-sg`
 
 ### Inbound Rules
 
-| Service | Port | Source |
-|----------|------|--------|
-| SSH | 22 | Administrator IP |
-| HTTP | 80 | 0.0.0.0/0 |
+| Protocol | Port | Source |
+|---|---:|---|
+| SSH | 22 | Administrator's allowed IP |
+| HTTP | 80 | `0.0.0.0/0` |
+
+SSH access is restricted to the administrator's allowed source rather than being exposed to the entire internet.
+
+HTTP is exposed because Apache is the monitored web service.
 
 ### Outbound Rules
 
-All outbound traffic is allowed to enable communication with AWS managed services.
-
-### Security Benefits
-
-- Restricts administrative access.
-- Allows only required application traffic.
-- Blocks unnecessary inbound connections.
+Outbound communication required by the implementation is permitted so that the instance can communicate with AWS managed services and required external endpoints.
 
 ---
 
 # 6. EC2 Instance Security
 
-Instance Name
+## 6.1 Instance
 
-cloudops-server
+| Property | Value |
+|---|---|
+| Instance Name | `cloudops-server` |
+| Instance ID | `i-0b7d483631875bb1c` |
+| Operating System | Amazon Linux 2023 |
+| Instance Type | `t3.micro` |
 
-Operating System
+## 6.2 Security Controls
 
-Amazon Linux 2023
+The EC2 instance uses:
 
-### Security Features
+- IAM role-based AWS authentication
+- Systems Manager Agent
+- CloudWatch Agent
+- Security Group controls
+- Amazon Linux 2023
+- Apache service monitoring
 
-- Latest Amazon Linux AMI
-- Automatic IAM authentication
-- SSM Agent installed
-- CloudWatch Agent installed
-- Minimal software installation
-- Apache service monitored continuously
+The instance does not require permanent AWS access keys.
 
-The EC2 instance does not store AWS Access Keys or Secret Keys.
+## 6.3 Application Security
+
+The project monitors the Apache service (`httpd`) as the P1 application service.
+
+The monitoring workflow detects Apache process failure and allows Lambda to initiate recovery through Systems Manager.
 
 ---
 
 # 7. Systems Manager Security
 
-AWS Systems Manager replaces direct SSH-based administration for automation tasks.
+AWS Systems Manager provides the controlled management path between Lambda and the EC2 instance.
 
-### Features Used
+## 7.1 Functions Used
 
 - Managed Node
 - Run Command
 - Session Manager
 
-### Benefits
+## 7.2 Security Benefits
 
-- No password-based remote administration.
-- Secure communication over HTTPS.
-- IAM-based authorization.
-- Command execution logging.
-- Reduced attack surface.
+Systems Manager reduces dependence on direct SSH-based automation by providing:
 
----
+- IAM-based authorization
+- Authenticated AWS API requests
+- Secure communication
+- Centralized command execution
+- Command execution status
+- Operational logging
 
-# 8. CloudWatch Security
+## 7.3 P1 Command Authorization
 
-CloudWatch securely receives metrics from the CloudWatch Agent using IAM authentication.
+For P1 incidents, Lambda uses Systems Manager to execute the Apache recovery operation.
 
-### Protected Resources
+The recovery action is:
 
-- System Metrics
-- Apache Process Metrics
-- Dashboard Data
-- CloudWatch Alarms
+```text
+systemctl restart httpd
+```
 
-Only authorized AWS services can publish and access monitoring data.
+The workflow then verifies the service and performs a stability recheck.
 
----
+## 7.4 P2 Command Authorization
 
-# 9. Lambda Security
+For P2 incidents, Systems Manager is used for diagnostic collection.
 
-Lambda Function
+The P2 workflow is intentionally diagnostic-only.
 
-Cloudops-NOC-automate
+It does not automatically:
 
-### Responsibilities
-
-- Receive SNS events.
-- Execute SSM Run Command.
-- Restart Apache service.
-- Publish notification.
-
-### Security Controls
-
-- IAM execution role.
-- Environment variables for configuration.
-- No embedded credentials.
-- Limited permissions following least privilege.
+- Restart arbitrary services
+- Terminate processes
+- Reboot the instance
+- Perform destructive remediation
 
 ---
 
-# 10. SNS Security
+# 8. Lambda Security
 
-SNS Topic
+## Lambda Function
 
-cloudops-sns
+**Function Name:** `Cloudops-NOC-automate`
 
-### Subscribers
+Lambda is the central incident-processing component.
 
-- AWS Lambda
-- Email Subscription
+## Security Controls
 
-### Security Features
+- IAM execution role
+- No hardcoded AWS credentials
+- AWS API authentication through IAM
+- CloudWatch Logs for execution auditing
+- Restricted operational actions
+- Alarm-name validation
+- Separate P1 and P2 workflows
 
-- IAM-controlled publishing.
-- Verified email subscription.
-- Secure HTTPS communication.
-- Event-driven notifications.
+## Alarm Validation
+
+Lambda recognizes only the finalized project alarms:
+
+| Alarm | Severity | Authorized Workflow |
+|---|---|---|
+| `NOC-cloudops-automate` | P1 | Apache auto-remediation |
+| `cpu alert` | P2 | CPU diagnostics |
+
+Unsupported alarms are ignored.
+
+This control prevents unrelated alarms, obsolete test alarms, or unsupported service conditions from entering the NOC automation workflow.
+
+---
+
+# 9. Amazon SNS Security
+
+## SNS Topic
+
+| Property | Value |
+|---|---|
+| Topic Name | `cloudops-sns` |
+| Display Name | `NOC-topic` |
+
+SNS provides controlled message distribution between CloudWatch, Lambda, and the operational email subscriber.
+
+## Security Controls
+
+- IAM-controlled AWS service access
+- Confirmed email subscription
+- AWS-authenticated service integration
+- HTTPS-based service communication
+- Event-driven message delivery
+
+SNS is used for both incident notification and the downstream Lambda trigger.
+
+---
+
+# 10. CloudWatch Security
+
+Amazon CloudWatch is responsible for receiving metrics, evaluating alarms, and providing monitoring visibility.
+
+## Protected Monitoring Areas
+
+- CPU utilization
+- Memory utilization
+- Disk metrics
+- Network metrics
+- Apache process count
+- CloudWatch Alarm states
+- Lambda execution logs
+
+The CloudWatch Agent uses the EC2 IAM role to publish monitoring information without storing AWS access keys on the instance.
 
 ---
 
 # 11. CloudWatch Agent Security
 
-The CloudWatch Agent runs as a system service on the EC2 instance.
+The CloudWatch Agent runs on the EC2 instance as a system service.
 
-### Configuration
+## Configuration Location
 
-Configuration File
-
-```
+```text
 /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/file_file_amazon-cloudwatch-agent.json
 ```
 
-### Metrics Collected
+## Metrics Collected
 
-- CPU Utilization
-- Memory Utilization
-- Disk Utilization
-- Network Metrics
-- Apache Process Count
+- CPU utilization
+- Memory utilization
+- Disk usage
+- Disk I/O
+- Network traffic
+- Apache process count
 
-### Security Measures
+## Security Measures
 
-- Uses IAM role authentication.
-- No stored AWS credentials.
-- Secure communication with CloudWatch.
-- Read-only access to system performance data.
-
----
-
-# 12. Logging and Auditing
-
-The project maintains operational logs for monitoring and troubleshooting.
-
-### Log Sources
-
-| Component | Log Location |
-|-----------|--------------|
-| CloudWatch Agent | /opt/aws/amazon-cloudwatch-agent/logs/ |
-| SSM Agent | /var/log/amazon/ssm/ |
-| System Logs | /var/log/messages |
-| Lambda Logs | Amazon CloudWatch Logs |
-
-### Benefits
-
-- Centralized log management.
-- Event tracking.
-- Operational auditing.
-- Faster troubleshooting.
+- IAM-based authentication
+- No embedded AWS credentials
+- Secure communication with AWS services
+- Limited monitoring permissions
+- Local configuration controlled by the operating system
 
 ---
 
-# 13. Credential Management
+# 12. Credential Management
 
-The project does not use permanent AWS credentials.
+The project does not depend on permanent AWS access keys stored on the EC2 instance or inside Lambda code.
 
-Authentication is performed through:
+AWS authentication is performed through IAM roles and temporary credentials.
 
-- IAM Role
-- Instance Metadata Service Version 2 (IMDSv2)
+This reduces the risk associated with:
 
-Advantages:
+- Credential leakage
+- Hardcoded keys
+- Manual credential rotation
+- Unauthorized reuse of static credentials
 
-- Temporary credentials.
-- Automatic credential rotation.
-- Improved security.
-- No manual key management.
+Where supported by the deployed EC2 configuration, the instance uses the AWS Instance Metadata Service for temporary credentials.
+
+---
+
+# 13. Logging and Auditing
+
+Operational logging is required to investigate failures and validate automation behavior.
+
+## Log Sources
+
+| Component | Log Source |
+|---|---|
+| Lambda | Amazon CloudWatch Logs |
+| CloudWatch Agent | `/opt/aws/amazon-cloudwatch-agent/logs/` |
+| SSM Agent | `/var/log/amazon/ssm/` |
+| System | `/var/log/messages` |
+
+## Lambda Audit Information
+
+Lambda execution logs provide visibility into:
+
+- Alarm parsing
+- Alarm identification
+- Severity detection
+- Incident ID generation
+- Notification delivery
+- SSM Command ID
+- SSM command status
+- P1 verification
+- P2 diagnostic collection
+- Final workflow status
+
+These logs support troubleshooting and operational verification.
 
 ---
 
 # 14. Data Protection
 
-The solution protects operational data by using AWS managed services.
+The solution primarily processes operational monitoring and incident information.
 
-Security measures include:
+Security controls include:
 
-- Encrypted HTTPS communication.
-- IAM authorization.
-- Controlled access to AWS APIs.
-- Secure service-to-service communication.
+- IAM authorization
+- HTTPS/TLS communication with AWS APIs
+- Controlled access to CloudWatch Logs
+- Controlled access to SNS
+- No permanent AWS credentials in application code
+- Restricted access to infrastructure resources
 
-No sensitive application data is stored within the automation workflow.
+The automation workflow does not intentionally store sensitive application data.
 
 ---
 
-# 15. Security Best Practices Implemented
+# 15. Automation Security
 
-The following AWS security best practices are implemented:
+Automation itself is treated as a security-sensitive capability because Lambda can execute commands on the EC2 instance.
 
-- Principle of Least Privilege.
-- IAM Role instead of Access Keys.
-- Security Group-based firewall.
-- Systems Manager for remote management.
-- CloudWatch monitoring.
-- Centralized logging.
-- Event-driven automation.
-- Temporary IAM credentials.
-- Secure API communication over HTTPS.
+The project therefore uses controlled alarm recognition.
+
+## P1
+
+Only the recognized P1 alarm can invoke the Apache recovery workflow:
+
+```text
+NOC-cloudops-automate
+        ↓
+P1
+        ↓
+SSM
+        ↓
+Restart httpd
+```
+
+## P2
+
+Only the recognized P2 alarm can invoke the CPU diagnostic workflow:
+
+```text
+cpu alert
+     ↓
+P2
+     ↓
+SSM Diagnostics
+     ↓
+Manual Review
+```
+
+This design reduces the risk of an unexpected alarm causing an unintended remediation action.
 
 ---
 
 # 16. Security Risks and Mitigation
 
 | Risk | Mitigation |
-|------|------------|
-| Unauthorized AWS API access | IAM Role with limited permissions |
-| Exposed credentials | No static access keys used |
-| Apache service failure | Automatic restart through Lambda and SSM |
-| Unauthorized server access | Security Group restrictions |
-| Lack of monitoring | CloudWatch Dashboard and Alarms |
-| Manual operational delays | Automated remediation workflow |
+|---|---|
+| Unauthorized AWS API access | IAM roles with required permissions only |
+| Exposed AWS credentials | No static credentials stored on EC2 or Lambda |
+| Unauthorized SSH access | SSH restricted by Security Group source |
+| Apache failure | Controlled P1 auto-remediation through SSM |
+| Excessive CPU usage | P2 diagnostic workflow with manual review |
+| Unsupported alarm triggering automation | Alarm-name validation in Lambda |
+| SSM command failure | Command status logging and operational review |
+| Lambda execution failure | CloudWatch Logs and notification workflow |
+| CloudWatch Agent failure | Agent monitoring and log review |
+| Missing operational visibility | CloudWatch Dashboard and Logs |
 
 ---
 
 # 17. Security Workflow
 
-Administrator
+The security-controlled operational flow is:
 
-↓
-
-IAM Authentication
-
-↓
-
-AWS Services
-
-↓
-
-CloudWatch Agent
-
-↓
-
-CloudWatch Monitoring
-
-↓
-
+```text
+CloudWatch Metric
+       ↓
 CloudWatch Alarm
-
-↓
-
+       ↓
 SNS Topic
+       ↓
+Lambda
+       ↓
+Alarm Validation
+       ↓
+ ┌───────────────┬────────────────┐
+ │               │                │
+P1              P2          Unsupported
+ │               │                │
+SSM Recovery   SSM Diagnostics  Ignore
+ │               │
+Verify          Manual Review
+ │
+SNS Notification
+```
 
-↓
-
-Lambda Function
-
-↓
-
-Systems Manager
-
-↓
-
-Restart Apache
-
-↓
-
-Success Notification
-
-All communication between AWS services is authenticated using IAM roles and secured over HTTPS.
-
----
-
-# 18. Compliance with AWS Best Practices
-
-The implemented solution follows AWS recommended operational and security practices by:
-
-- Using managed AWS services.
-- Applying least privilege access.
-- Eliminating hardcoded credentials.
-- Using IAM roles for authentication.
-- Monitoring infrastructure continuously.
-- Automating operational response.
-- Maintaining centralized logging.
+Every supported automation path uses AWS service authentication and IAM authorization.
 
 ---
 
-# 19. Conclusion
+# 18. Security Best Practices Implemented
 
-The security architecture for the CloudOps NOC Automation project provides a secure and reliable environment for automated monitoring and remediation. By integrating IAM, Security Groups, Systems Manager, CloudWatch, SNS, and Lambda, the solution minimizes security risks while ensuring operational efficiency.
+The project implements the following security practices:
 
-The use of IAM roles, secure communication, centralized logging, and automated recovery demonstrates adherence to AWS security best practices and provides a strong foundation for enterprise cloud operations.
+- Principle of Least Privilege
+- IAM roles instead of permanent access keys
+- Security Group-based network controls
+- Systems Manager for controlled remote execution
+- CloudWatch monitoring and logging
+- Alarm validation before automated action
+- Separation of remediation and diagnostic workflows
+- Secure AWS API communication
+- Centralized operational logs
+- Restricted administrative network access
+
+---
+
+# 19. Security Verification Checklist
+
+| Security Control | Verification |
+|---|---|
+| EC2 IAM role attached | Completed |
+| No static AWS credentials on EC2 | Verified |
+| Lambda uses IAM execution role | Verified |
+| SSH restricted | Configured |
+| HTTP restricted to required application exposure | Configured |
+| SSM managed node online | Verified |
+| SSM Run Command available | Verified |
+| CloudWatch Agent authenticated through IAM | Verified |
+| SNS subscription confirmed | Verified |
+| Lambda alarm validation implemented | Verified |
+| P1 remediation restricted to supported alarm | Verified |
+| P2 restricted to diagnostics | Verified |
+| CloudWatch Logs available | Verified |
+
+---
+
+# 20. Conclusion
+
+The CloudOps NOC Automation security architecture provides layered protection across identity, network, compute, monitoring, notification, and automation components.
+
+The design uses IAM-based authentication, Security Groups, Systems Manager, CloudWatch, SNS, Lambda, and centralized logging to control access and maintain operational visibility.
+
+Most importantly, the finalized automation scope separates the two incident types by risk:
+
+- **P1 Apache failure** is authorized for automatic service recovery.
+- **P2 CPU utilization above 50%** is limited to automated diagnostics and manual review.
+
+This separation reduces the possibility of unsafe automated actions while preserving the operational benefits of AWS-based NOC automation.
