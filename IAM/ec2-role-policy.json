@@ -1,4 +1,0 @@
-{
-    "ManagedPolicy": "AmazonSSMManagedInstanceCore",
-    "Purpose": "Allows EC2 to register as a Systems Manager Managed Instance and receive Run Commands."
-}
