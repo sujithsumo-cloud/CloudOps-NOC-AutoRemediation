@@ -25,30 +25,9 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "Production")
 REGION = os.environ.get("AWS_REGION", "ap-south-1")
 
 
-# ============================================================
-# ICONS
-# ============================================================
-
-ICON = {
-    "detect": "🔍",
-    "p1": "🛠️",
-    "p2": "📊",
-    "resolved": "✅",
-    "failed": "❌",
-    "escalated": "🚨",
-    "mail": "📧",
-}
-
 
 # ============================================================
 # ALARM CONFIGURATION
-#
-# ONLY THESE TWO ALARM NAMES ARE ACTIONABLE.
-#
-# NOC-cloudops-automate -> P1 -> HTTPD recovery
-# cpu alert             -> P2 -> CPU diagnosis
-#
-# Unknown alarms are ignored.
 # ============================================================
 
 ALARM_CONFIG = {
@@ -56,7 +35,6 @@ ALARM_CONFIG = {
         "priority": "P1",
         "severity": "P1 - Critical",
         "service": "Apache HTTP Server (httpd)",
-        "icon": ICON["p1"],
         "action_type": "recovery",
         "metric_label": "procstat_lookup_pid_count",
         "threshold_label": "< 1",
@@ -70,7 +48,6 @@ ALARM_CONFIG = {
         "priority": "P2",
         "severity": "P2 - High",
         "service": "EC2 CPU Utilization",
-        "icon": ICON["p2"],
         "action_type": "diagnosis",
         "metric_label": "CPUUtilization",
         "threshold_label": "> 50%",
@@ -91,18 +68,12 @@ ALARM_CONFIG = {
 # ============================================================
 
 def get_sns_topic_name():
-    """
-    Extract SNS topic name from the configured Topic ARN.
-
-    Example:
-        arn:aws:sns:ap-south-1:123456789012:CloudOps-NOC
-        ->
-        CloudOps-NOC
-    """
 
     try:
         return TOPIC_ARN.split(":")[-1]
+
     except Exception:
+
         return "Unknown"
 
 
@@ -111,9 +82,6 @@ def get_sns_topic_name():
 # ============================================================
 
 def get_instance_details():
-    """
-    Fetch useful EC2 metadata for the incident email.
-    """
 
     details = {
         "instance_name": INSTANCE_ID,
@@ -122,16 +90,23 @@ def get_instance_details():
     }
 
     try:
+
         response = ec2.describe_instances(
             InstanceIds=[INSTANCE_ID]
         )
 
-        reservations = response.get("Reservations", [])
+        reservations = response.get(
+            "Reservations",
+            []
+        )
 
         if not reservations:
             return details
 
-        instances = reservations[0].get("Instances", [])
+        instances = reservations[0].get(
+            "Instances",
+            []
+        )
 
         if not instances:
             return details
@@ -176,36 +151,27 @@ def get_instance_name():
 
 
 # ============================================================
-# STAGE 1
-# PARSE DIRECT CLOUDWATCH ALARM -> LAMBDA EVENT
+# PARSE DIRECT CLOUDWATCH ALARM
 # ============================================================
 
 def parse_alarm_context(event):
-    """
-    Parse a direct CloudWatch Alarm -> Lambda event.
-
-    Architecture:
-
-        CloudWatch Alarm
-              ↓
-           Lambda
-
-    This is NOT an SNS event.
-
-    Alarm information is contained inside:
-
-        event["alarmData"]
-    """
 
     try:
 
         alarm_data = event["alarmData"]
 
-        alarm_name = alarm_data.get("alarmName")
+        alarm_name = alarm_data.get(
+            "alarmName"
+        )
 
-        state_data = alarm_data.get("state", {})
+        state_data = alarm_data.get(
+            "state",
+            {}
+        )
 
-        state = state_data.get("value")
+        state = state_data.get(
+            "value"
+        )
 
         reason = state_data.get(
             "reason",
@@ -214,7 +180,9 @@ def parse_alarm_context(event):
 
         timestamp = state_data.get(
             "timestamp",
-            datetime.now(timezone.utc).isoformat()
+            datetime.now(
+                timezone.utc
+            ).isoformat()
         )
 
         alarm_arn = event.get(
@@ -271,18 +239,6 @@ def parse_alarm_context(event):
 # ============================================================
 
 def detect_incident(event):
-    """
-    Single classification gate.
-
-    Priority is determined ONLY by exact CloudWatch
-    alarm name.
-
-    Unknown alarm names:
-        ignored
-        no SSM
-        no SNS
-        no email
-    """
 
     context = parse_alarm_context(event)
 
@@ -306,7 +262,9 @@ def detect_incident(event):
 
         return None
 
-    config = ALARM_CONFIG.get(alarm_name)
+    config = ALARM_CONFIG.get(
+        alarm_name
+    )
 
     if config is None:
 
@@ -318,7 +276,7 @@ def detect_incident(event):
         return None
 
     print(
-        f"{ICON['detect']} DETECTED | "
+        f"DETECTED | "
         f"{config['priority']} | "
         f"{alarm_name}"
     )
@@ -334,16 +292,10 @@ def detect_incident(event):
 # ============================================================
 
 def get_incident_id():
-    """
-    Generate daily sequential incident IDs.
 
-    Example:
-        INC-20260811-0001
-    """
-
-    today = datetime.now(timezone.utc).strftime(
-        "%Y%m%d"
-    )
+    today = datetime.now(
+        timezone.utc
+    ).strftime("%Y%m%d")
 
     parameter_name = (
         f"/cloudops/incident-counter/{today}"
@@ -378,27 +330,18 @@ def get_incident_id():
 # ============================================================
 
 def run_ssm(commands, comment):
-    """
-    Execute an SSM command and monitor it.
-
-    Returns:
-
-        {
-            "command_id": "...",
-            "result": {...}
-        }
-    """
 
     response = ssm.send_command(
-        InstanceIds=[INSTANCE_ID],
-        DocumentName="AWS-RunShellScript",
-        Parameters={
-            "commands": commands
-        },
-        Comment=comment,
-    )
+    InstanceIds=[INSTANCE_ID],
+    DocumentName="AWS-RunShellScript",
+    Parameters={
+        "commands": commands
+    }
+)
 
-    command_id = response["Command"]["CommandId"]
+    command_id = response[
+        "Command"
+    ]["CommandId"]
 
     print(
         f"SSM Command ID: {command_id}"
@@ -415,7 +358,9 @@ def run_ssm(commands, comment):
                 InstanceId=INSTANCE_ID,
             )
 
-            status = result["Status"]
+            status = result[
+                "Status"
+            ]
 
             print(
                 f"Attempt {attempt + 1}: "
@@ -478,12 +423,15 @@ def build_email(
     final_service_status="N/A",
     recovery_status="N/A",
 ):
-    """
-    Build the detailed CloudOps NOC email.
-    """
 
-    instance_name = instance_details["instance_name"]
-    private_ip = instance_details["private_ip"]
+    instance_name = instance_details[
+        "instance_name"
+    ]
+
+    private_ip = instance_details[
+        "private_ip"
+    ]
+
     availability_zone = instance_details[
         "availability_zone"
     ]
@@ -580,20 +528,29 @@ AWS Region: {incident["event_region"]}
 
 def send_mail(subject, body):
 
+    safe_subject = (
+        str(subject)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .strip()[:100]
+    )
+
     sns.publish(
         TopicArn=TOPIC_ARN,
-        Subject=subject[:100],
+        Subject=safe_subject,
         Message=body,
     )
 
     print(
-        f"{ICON['mail']} Notification sent: {subject}"
+        f"Notification sent: {safe_subject}"
     )
 
 
 # ============================================================
 # P1
-# HTTPD RECOVERY
+# HTTPD RECOVERY WITH ONE RETRY
 # ============================================================
 
 def handle_p1(
@@ -603,20 +560,22 @@ def handle_p1(
     start_time,
 ):
 
-    instance_name = instance_details["instance_name"]
+    instance_name = instance_details[
+        "instance_name"
+    ]
 
     # --------------------------------------------------------
     # INITIAL INCIDENT EMAIL
     # --------------------------------------------------------
 
     pipeline = pipeline_strip(
-        "🔍 DETECTED",
-        "🛠️ RECOVERING",
+        "DETECTED",
+        "RECOVERING",
     )
 
     send_mail(
         subject=(
-            f"🛠️ [{incident['severity']}] "
+            f"[{incident['severity']}] "
             f"{incident['service']} Down | "
             f"{instance_name} | "
             f"{REGION}"
@@ -639,66 +598,158 @@ def handle_p1(
     )
 
     # --------------------------------------------------------
-    # INITIAL HTTPD RECOVERY
-    # --------------------------------------------------------
-
-    commands = incident["remediation"] + [
-        "sleep 5",
-        incident["verify_command"],
-    ]
-
-    initial_execution = run_ssm(
-        commands,
-        comment=(
-            f"NOC {incident_id} "
-            "P1 httpd recovery"
-        ),
-    )
-
-    initial_command_id = (
-        initial_execution["command_id"]
-        if initial_execution
-        else "N/A"
-    )
-
-    initial_result = (
-        initial_execution["result"]
-        if initial_execution
-        else None
-    )
-
-    # --------------------------------------------------------
-    # VERIFY INITIAL HTTPD STATUS
+    # HTTPD STATUS CHECK
     # --------------------------------------------------------
 
     def is_active(result_data):
 
         if not result_data:
+
             return False
 
-        if result_data["Status"] != "Success":
+        if result_data.get(
+            "Status"
+        ) != "Success":
+
             return False
 
         output = (
             result_data
-            .get("StandardOutputContent", "")
+            .get(
+                "StandardOutputContent",
+                ""
+            )
             .strip()
         )
 
         lines = output.splitlines()
 
         if not lines:
+
             return False
 
-        return lines[-1].strip() == "active"
+        return (
+            lines[-1].strip()
+            == "active"
+        )
 
-    status_ok = is_active(initial_result)
+    # --------------------------------------------------------
+    # RECOVERY ATTEMPT FUNCTION
+    # --------------------------------------------------------
+
+    def recovery_attempt(
+        attempt_number
+    ):
+
+        print(
+            f"Starting P1 HTTPD recovery "
+            f"attempt #{attempt_number}"
+        )
+
+        commands = (
+            incident["remediation"]
+            + [
+                "sleep 5",
+                incident[
+                    "verify_command"
+                ],
+            ]
+        )
+
+        execution = run_ssm(
+            commands,
+            comment=(
+                f"NOC {incident_id} "
+                f"P1 httpd recovery "
+                f"attempt {attempt_number}"
+            ),
+        )
+
+        command_id = (
+            execution["command_id"]
+            if execution
+            else "N/A"
+        )
+
+        result = (
+            execution["result"]
+            if execution
+            else None
+        )
+
+        success = is_active(
+            result
+        )
+
+        print(
+            f"P1 recovery attempt "
+            f"#{attempt_number}: "
+            f"{'PASSED' if success else 'FAILED'}"
+        )
+
+        return (
+            success,
+            command_id,
+            result,
+        )
+
+    # --------------------------------------------------------
+    # ATTEMPT #1
+    # --------------------------------------------------------
+
+    (
+        status_ok,
+        initial_command_id,
+        initial_result,
+    ) = recovery_attempt(1)
 
     initial_check_status = (
         "PASSED"
         if status_ok
         else "FAILED"
     )
+
+    # --------------------------------------------------------
+    # RETRY
+    #
+    # ONLY ONE RETRY IS PERFORMED.
+    # --------------------------------------------------------
+
+    retry_command_id = "N/A"
+    retry_check_status = "NOT PERFORMED"
+
+    if not status_ok:
+
+        print(
+            "Initial HTTPD recovery failed. "
+            "Starting one retry."
+        )
+
+        retry_check_status = "FAILED"
+
+        (
+            retry_success,
+            retry_command_id,
+            retry_result,
+        ) = recovery_attempt(2)
+
+        if retry_success:
+
+            status_ok = True
+            retry_check_status = "PASSED"
+
+            print(
+                "P1 HTTPD retry succeeded."
+            )
+
+        else:
+
+            status_ok = False
+
+            print(
+                "P1 HTTPD retry failed. "
+                "Escalating incident."
+            )
 
     # --------------------------------------------------------
     # STABILITY VERIFICATION
@@ -710,14 +761,17 @@ def handle_p1(
     if status_ok:
 
         print(
-            "Initial httpd check passed. "
-            "Performing stability recheck in 15 seconds."
+            "HTTPD recovery passed. "
+            "Performing stability recheck "
+            "in 15 seconds."
         )
 
         recheck = run_ssm(
             [
                 "sleep 15",
-                incident["verify_command"],
+                incident[
+                    "verify_command"
+                ],
             ],
             comment=(
                 f"NOC {incident_id} "
@@ -762,19 +816,19 @@ def handle_p1(
     )
 
     # --------------------------------------------------------
-    # RESOLVED
+    # SUCCESS
     # --------------------------------------------------------
 
     if status_ok:
 
         pipeline = pipeline_strip(
-            "🔍 DETECTED",
-            "🛠️ RECOVERED",
-            "✅ RESOLVED",
+            "DETECTED",
+            "RECOVERED",
+            "RESOLVED",
         )
 
         subject = (
-            f"✅ [{incident['severity']}] "
+            f"[{incident['severity']}] "
             f"{incident['service']} Resolved | "
             f"{instance_name} | "
             f"{REGION} | "
@@ -799,13 +853,13 @@ def handle_p1(
     else:
 
         pipeline = pipeline_strip(
-            "🔍 DETECTED",
-            "❌ RECOVERY FAILED",
-            "🚨 ESCALATED",
+            "DETECTED",
+            "RECOVERY FAILED",
+            "ESCALATED",
         )
 
         subject = (
-            f"🚨 [{incident['severity']}] "
+            f"[{incident['severity']}] "
             f"{incident['service']} Escalation | "
             f"{instance_name} | "
             f"{REGION} | "
@@ -813,7 +867,8 @@ def handle_p1(
         )
 
         status = (
-            "Auto-remediation failed -- "
+            "Auto-remediation failed after "
+            "initial attempt and retry -- "
             "httpd was not confirmed active"
         )
 
@@ -822,11 +877,12 @@ def handle_p1(
         )
 
         recovery_status = (
-            "FAILED -- manual investigation required"
+            "FAILED -- initial recovery and "
+            "retry failed; incident escalated"
         )
 
     # --------------------------------------------------------
-    # FINAL EMAIL
+    # FINAL EMAIL DETAILS
     # --------------------------------------------------------
 
     extra = f"""
@@ -837,14 +893,33 @@ RECOVERY VERIFICATION
 Initial SSM Command : {initial_command_id}
 Initial HTTPD Check : {initial_check_status}
 
+Retry SSM Command   : {retry_command_id}
+Retry Check         : {retry_check_status}
+
 Stability SSM Cmd   : {stability_command_id}
 Stability Check     : {stability_check_status}
 
 Final HTTPD Status  : {final_service_status}
 
+Recovery Policy     : One automatic retry permitted.
+
+"""
+
+    if status_ok:
+
+        extra += """
 The Apache HTTP Server was automatically remediated
 and independently verified through the NOC stability
 verification workflow.
+"""
+
+    else:
+
+        extra += """
+The Apache HTTP Server could not be confirmed active
+after the initial recovery attempt and one retry.
+
+The incident has been escalated for manual investigation.
 """
 
     send_mail(
@@ -873,8 +948,10 @@ verification workflow.
         "resolved": status_ok,
         "resolutionTime": resolution_time,
         "initialSsmCommandId": initial_command_id,
+        "retrySsmCommandId": retry_command_id,
         "stabilitySsmCommandId": stability_command_id,
         "initialCheck": initial_check_status,
+        "retryCheck": retry_check_status,
         "stabilityCheck": stability_check_status,
     }
 
@@ -882,9 +959,6 @@ verification workflow.
 # ============================================================
 # P2
 # CPU DIAGNOSIS ONLY
-#
-# IMPORTANT:
-# There is NO restart command here.
 # ============================================================
 
 def handle_p2(
@@ -894,20 +968,18 @@ def handle_p2(
     start_time,
 ):
 
-    instance_name = instance_details["instance_name"]
-
-    # --------------------------------------------------------
-    # INITIAL P2 EMAIL
-    # --------------------------------------------------------
+    instance_name = instance_details[
+        "instance_name"
+    ]
 
     pipeline = pipeline_strip(
-        "🔍 DETECTED",
-        "📊 DIAGNOSING",
+        "DETECTED",
+        "DIAGNOSING",
     )
 
     send_mail(
         subject=(
-            f"📊 [{incident['severity']}] "
+            f"[{incident['severity']}] "
             f"High CPU Detected | "
             f"{instance_name} | "
             f"{REGION}"
@@ -925,10 +997,6 @@ def handle_p2(
             recovery_status="Diagnosis in progress",
         ),
     )
-
-    # --------------------------------------------------------
-    # CPU DIAGNOSTICS
-    # --------------------------------------------------------
 
     execution = run_ssm(
         incident["diagnostic_commands"],
@@ -954,7 +1022,10 @@ def handle_p2(
 
         output = (
             result
-            .get("StandardOutputContent", "")
+            .get(
+                "StandardOutputContent",
+                ""
+            )
             .strip()
         )
 
@@ -966,7 +1037,6 @@ def handle_p2(
     else:
 
         output = ""
-
         diagnostic_status = "No result"
 
     if not output:
@@ -980,19 +1050,15 @@ def handle_p2(
         f"{int(time.time() - start_time)} seconds"
     )
 
-    # --------------------------------------------------------
-    # P2 DIAGNOSIS COMPLETE / ESCALATED
-    # --------------------------------------------------------
-
     pipeline = pipeline_strip(
-        "🔍 DETECTED",
-        "📊 DIAGNOSED",
-        "🚨 ESCALATED",
+        "DETECTED",
+        "DIAGNOSED",
+        "ESCALATED",
     )
 
     send_mail(
         subject=(
-            f"🚨 [{incident['severity']}] "
+            f"[{incident['severity']}] "
             f"CPU Diagnostic Report | "
             f"{instance_name} | "
             f"{REGION} | "
@@ -1081,16 +1147,6 @@ def lambda_handler(event, context):
 
     incident = detect_incident(event)
 
-    # --------------------------------------------------------
-    # IMPORTANT:
-    #
-    # Unknown/manual/test events STOP HERE.
-    #
-    # NO incident ID
-    # NO SSM command
-    # NO SNS email
-    # --------------------------------------------------------
-
     if incident is None:
 
         return {
@@ -1117,7 +1173,6 @@ def lambda_handler(event, context):
     )
 
     print(
-        f"{incident['icon']} "
         f"{incident_id} | "
         f"{incident['priority']} | "
         f"{incident['alarm_name']} | "
