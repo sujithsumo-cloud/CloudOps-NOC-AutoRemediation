@@ -1,8 +1,0 @@
-{
-    "ManagedPolicies": [
-        "AWSLambdaBasicExecutionRole"
-    ],
-    "CustomPermissions": [
-        "ssm:SendCommand"
-    ]
-}
