@@ -1,0 +1,59 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "IncidentCounterParameterAccess",
+			"Effect": "Allow",
+			"Action": [
+				"ssm:GetParameter",
+				"ssm:PutParameter"
+			],
+			"Resource": "arn:aws:ssm:ap-south-1:257074875139:parameter/cloudops/incident-counter/*"
+		},
+		{
+			"Sid": "ReadInstanceDetails",
+			"Effect": "Allow",
+			"Action": [
+				"ec2:DescribeInstances"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "SendSSMCommand",
+			"Effect": "Allow",
+			"Action": [
+				"ssm:SendCommand"
+			],
+			"Resource": [
+				"arn:aws:ec2:ap-south-1:257074875139:instance/i-0b7d483631875bb1c",
+				"arn:aws:ssm:ap-south-1::document/AWS-RunShellScript"
+			]
+		},
+		{
+			"Sid": "ReadSSMCommandResult",
+			"Effect": "Allow",
+			"Action": [
+				"ssm:GetCommandInvocation"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "PublishToNOCTopic",
+			"Effect": "Allow",
+			"Action": [
+				"sns:Publish"
+			],
+			"Resource": "arn:aws:sns:ap-south-1:257074875139:cloudops-sns"
+		},
+		{
+			"Sid": "LambdaOwnLogs",
+			"Effect": "Allow",
+			"Action": [
+				"logs:CreateLogGroup",
+				"logs:CreateLogStream",
+				"logs:PutLogEvents"
+			],
+			"Resource": "arn:aws:logs:ap-south-1:257074875139:log-group:/aws/lambda/*"
+		}
+	]
+}
