@@ -52,13 +52,13 @@ The project uses a simple single-VPC architecture.
               │       10.0.0.0/16       │
               │                         │
               │   Public Subnet         │
-              │   10.0.1.0/24           │
+              │   10.0.0.0/28           │
               │        │                │
               │        ▼                │
               │   EC2 Instance          │
               │   cloudops-server       │
               │        │                │
-              │   cloudops-sg            │
+              │   cloudops-sg           │
               └─────────────────────────┘
 ```
 
@@ -85,7 +85,7 @@ The EC2 instance is deployed inside a public subnet.
 | Property | Value |
 |---|---|
 | Subnet Name | cloudops-subnet |
-| CIDR | 10.0.1.0/24 |
+| CIDR | 10.0.0.0/28 |
 | Type | Public |
 | Availability Zone | ap-south-1a |
 | Purpose | Hosts EC2 instance |
