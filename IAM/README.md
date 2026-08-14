@@ -673,37 +673,7 @@ Then check the Lambda log group in CloudWatch Logs.
 
 ---
 
-# 25. IAM Project Files
-
-Recommended repository structure:
-
-```text
-iam/
-├── README.md
-├── roles/
-│   ├── ec2-role/
-│   │   ├── trust-policy.json
-│   │   └── permissions-policy.json
-│   │
-│   └── lambda-role/
-│       ├── trust-policy.json
-│       └── permissions-policy.json
-│
-├── policies/
-│   ├── ec2-cloudwatch-policy.json
-│   ├── lambda-ssm-policy.json
-│   └── lambda-sns-policy.json
-│
-├── resource-policies/
-│   └── sns-topic-policy.json
-│
-└── troubleshooting/
-    └── iam-troubleshooting.md
-```
-
----
-
-# 26. IAM Relationship With the Seven Project Services
+# 25. IAM Relationship With the Seven Project Services
 
 | Service | IAM Relationship |
 |---|---|
@@ -717,7 +687,7 @@ iam/
 
 ---
 
-# 27. Security Best Practices
+# 26. Security Best Practices
 
 The following practices should be maintained throughout the project:
 
@@ -734,7 +704,7 @@ The following practices should be maintained throughout the project:
 
 ---
 
-# 28. Current Project Scope
+# 27. Current Project Scope
 
 The IAM implementation supports the project's current automation scope:
 
@@ -749,7 +719,7 @@ The project does not require additional IAM roles for unused services or future 
 
 ---
 
-# 29. Final IAM Architecture
+# 28. Final IAM Architecture
 
 ```text
                          IAM
