@@ -2,27 +2,32 @@
 
 ## Project Title
 
-CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda, and AWS Systems Manager
+CloudOps NOC Automation
 
 ---
 
 # Document Information
 
-| Item | Details |
-|------|----------|
+| Item          | Details                               |
+| ------------- | ------------------------------------- |
 | Document Name | Backup & Disaster Recovery Plan (BDR) |
-| Project | CloudOps NOC Automation |
-| Version | 1.0 |
-| Prepared By | Sujith |
-| Date | July 2026 |
+| Project       | CloudOps NOC Automation               |
+| Version       | 2.0                                   |
+| Prepared By   | Sujith                                |
+| Date          | August 2026                           |
 
 ---
 
 # 1. Purpose
 
-This document describes the Backup and Disaster Recovery (BDR) strategy for the CloudOps NOC Automation solution. The objective is to ensure business continuity by protecting critical infrastructure, recovering from failures, and minimizing service downtime.
+This document defines the Backup and Disaster Recovery (BDR) strategy for the CloudOps NOC Automation solution.
 
-The solution is designed to recover automatically from application failures while also providing procedures for recovering AWS infrastructure if a disaster occurs.
+The objective is to ensure that the monitoring and automated incident-response capabilities can be restored efficiently after application, monitoring, automation, or infrastructure failures.
+
+The recovery approach supports the finalized project scope of:
+
+- **P1 – HTTPD service automation**
+- **P2 – CPU utilization automation**
 
 ---
 
@@ -30,208 +35,190 @@ The solution is designed to recover automatically from application failures whil
 
 The Backup and Disaster Recovery strategy has the following objectives:
 
-- Protect the application infrastructure.
-- Reduce service downtime.
-- Restore failed resources quickly.
-- Minimize operational impact.
-- Ensure business continuity.
-- Maintain system availability.
+- Protect critical project configurations and source code.
+- Reduce service recovery time.
+- Restore monitoring and automation capabilities after failures.
+- Minimize operational impact during an incident.
+- Maintain continuity of the NOC monitoring and remediation workflow.
+- Provide documented recovery procedures for manual intervention when automatic recovery is unavailable.
 
 ---
 
 # 3. Scope
 
-This document covers the recovery strategy for the following AWS resources:
+This document covers recovery of the components required to support the CloudOps NOC Automation solution, including:
 
-- Amazon EC2 Instance
-- IAM Role
-- Amazon CloudWatch
-- CloudWatch Dashboard
-- CloudWatch Alarms
-- CloudWatch Agent Configuration
-- Amazon SNS
-- AWS Lambda
-- AWS Systems Manager
-- Project Documentation
-- Source Code Repository
+- EC2 application environment
+- Monitoring configuration
+- CloudWatch alarms and dashboards
+- Notification configuration
+- Lambda automation
+- Systems Manager configuration
+- IAM permissions
+- Project documentation
+- Automation source code
+
+The project scope is limited to the two finalized automation levels:
+
+| Severity | Automation Area | Recovery Objective |
+| -------- | --------------- | ------------------ |
+| P1 | HTTPD service failure | Restore the Apache service automatically |
+| P2 | High CPU utilization | Detect and perform the configured CPU remediation workflow |
+
+P3 or unknown-service automation is not included in the recovery scope.
 
 ---
 
 # 4. Backup Strategy
 
-The project uses a combination of AWS-managed services and configuration backups.
+The project uses configuration backups, source-code version control, and infrastructure recovery procedures.
 
-| Resource | Backup Method |
-|----------|---------------|
-| EC2 Instance | Amazon Machine Image (AMI) |
-| CloudWatch Configuration | JSON Configuration File |
-| Lambda Function | Source Code Backup |
-| IAM Policy | JSON Policy Backup |
-| CloudWatch Dashboard | Dashboard JSON Export |
-| Project Documents | GitHub / Local Backup |
-| Architecture Diagrams | Local Backup |
-| Markdown Files | GitHub Repository |
-
----
-
-# 5. EC2 Backup Strategy
-
-The EC2 instance contains:
-
-- Apache Web Server
-- CloudWatch Agent
-- SSM Agent
-- Configuration Files
-
-### Backup Method
-
-Create an Amazon Machine Image (AMI).
-
-### Backup Frequency
-
-- Before major configuration changes.
-- Before production deployment.
-- Before operating system updates.
-
-### Benefits
-
-- Complete server recovery.
-- Faster deployment.
-- Easy restoration.
+| Area | Backup / Recovery Method |
+| ---- | ------------------------- |
+| EC2 environment | AMI or equivalent infrastructure recovery |
+| Monitoring configuration | Configuration file backup |
+| Lambda automation | Source-code version control |
+| IAM permissions | Policy configuration backup |
+| CloudWatch dashboard | Dashboard configuration backup |
+| CloudWatch alarms | Alarm configuration documented and reproducible |
+| Notification configuration | SNS configuration documented and reproducible |
+| Project documentation | Version-controlled and local backup |
+| Architecture diagrams | Local and repository backup |
 
 ---
 
-# 6. CloudWatch Configuration Backup
+# 5. EC2 Recovery Strategy
 
-The CloudWatch Agent configuration is stored as a JSON file.
+The EC2 environment hosts the application and monitoring components required by the automation workflow.
 
-Configuration Location
+A recoverable copy of the server configuration should be maintained before major infrastructure or operating-system changes.
 
-```
-/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/file_file_amazon-cloudwatch-agent.json
-```
+### Recovery Method
 
-Backup Method
+- Restore from the latest suitable AMI, where available.
+- Alternatively, launch a replacement EC2 instance and restore the required application and monitoring configuration.
 
-- Copy the configuration file.
-- Store it in the project repository.
-- Maintain version history.
+### Recovery Validation
 
-Benefits
+After recovery:
 
-- Easy recovery.
-- Consistent monitoring configuration.
-- Quick redeployment.
-
----
-
-# 7. Lambda Backup Strategy
-
-Lambda Function
-
-```
-Cloudops-NOC-automate
-```
-
-Backup Components
-
-- Python source code
-- Environment variables
-- IAM execution role configuration
-
-Backup Method
-
-- Store source code in GitHub.
-- Maintain version history.
-- Export deployment package if required.
+- Verify the operating system is available.
+- Verify Apache is installed and running.
+- Verify the monitoring agent is operational.
+- Verify Systems Manager connectivity.
+- Verify required IAM permissions.
+- Confirm monitoring data is being received.
 
 ---
 
-# 8. IAM Backup Strategy
+# 6. Monitoring Configuration Recovery
 
-IAM Role
+Monitoring configuration is required to detect P1 HTTPD failures and support P2 CPU monitoring.
 
-```
-cloudops-EC2-inline-role
-```
+The monitoring configuration should be backed up and maintained under version control.
 
-Backup Components
+### Recovery Steps
 
-- Inline Policy JSON
-- Trust Relationship
-- Role Configuration
-
-Backup Method
-
-- Save IAM policy as a JSON file.
-- Store the policy in the project repository.
-- Document role permissions.
+1. Restore the monitoring configuration.
+2. Start or restart the monitoring agent.
+3. Confirm metrics are being published.
+4. Verify the required metrics are visible in CloudWatch.
+5. Validate the related alarm conditions.
 
 ---
 
-# 9. CloudWatch Dashboard Backup
+# 7. Automation Code Recovery
 
-Dashboard Name
+The automation logic should be maintained under version control.
 
-```
-cloudops-NOC-dashboard
-```
+The backup should include:
 
-Backup Method
+- Lambda source code
+- Required configuration values
+- Automation logic for P1 HTTPD remediation
+- Automation logic for P2 CPU remediation
 
-- Export dashboard configuration.
-- Save the JSON definition.
-- Maintain version control.
+### Recovery Steps
 
-Benefits
-
-- Quick dashboard restoration.
-- Consistent monitoring layout.
+1. Restore the approved source code.
+2. Deploy the code using the established Lambda deployment process.
+3. Verify the Lambda execution role.
+4. Test the automation workflow.
+5. Confirm successful execution through CloudWatch Logs.
 
 ---
 
-# 10. CloudWatch Alarm Backup
+# 8. IAM Recovery Strategy
 
-Configured Alarms
+IAM permissions are required for secure communication between the automation components.
 
-- NOC-cloudops-automate
-- cloudops-cpuutilization
+The recovery backup should contain the approved IAM policy definitions and role configuration.
 
-Backup Information
+### Recovery Steps
 
-- Alarm Name
-- Metric
+1. Restore the required IAM role.
+2. Restore the approved permissions.
+3. Verify the trust relationship.
+4. Confirm that Lambda can perform the required automation actions.
+5. Confirm that the EC2 environment can communicate with required AWS services.
+
+---
+
+# 9. CloudWatch Dashboard Recovery
+
+The monitoring dashboard provides operational visibility into the infrastructure.
+
+### Recovery Method
+
+- Maintain the dashboard configuration as a backup.
+- Recreate the dashboard if the original configuration is lost.
+- Verify that the required metrics are displayed after restoration.
+
+### Recovery Validation
+
+The dashboard should provide visibility into the monitoring information required for:
+
+- HTTPD service monitoring
+- CPU utilization monitoring
+- General infrastructure health
+
+---
+
+# 10. CloudWatch Alarm Recovery
+
+CloudWatch alarms are essential to the incident-detection workflow.
+
+The recovery documentation should preserve:
+
+- Alarm purpose
+- Monitored metric
 - Threshold
-- SNS Action
-- Evaluation Period
-- Alarm Configuration
+- Evaluation configuration
+- Notification action
+- Automation relationship
 
-Store the alarm configuration within the project documentation.
-
----
-
-# 11. SNS Backup Strategy
-
-SNS Topic
-
-```
-cloudops-sns
-```
-
-Backup Details
-
-- Topic Name
-- Topic ARN
-- Display Name
-- Email Subscription
-
-Document the SNS configuration for future deployment.
+The restored monitoring environment must be validated to ensure that the P1 HTTPD and P2 CPU workflows can detect their respective conditions correctly.
 
 ---
 
-# 12. Documentation Backup
+# 11. Notification Recovery
 
-The following project documents should be backed up.
+The notification mechanism is used to communicate incident and remediation status to the operations team.
+
+The recovery documentation should preserve:
+
+- Notification topic configuration
+- Subscription details
+- Notification purpose
+- Automation integration
+
+After restoration, a controlled test should confirm that notifications are delivered correctly.
+
+---
+
+# 12. Documentation and Source Code Backup
+
+The following project artifacts should be maintained in version control and local backup:
 
 - Business Requirement Document
 - Solution Architecture
@@ -242,337 +229,299 @@ The following project documents should be backed up.
 - Security Architecture
 - Monitoring & Logging Strategy
 - Backup & Disaster Recovery Plan
-- Cost Estimation
+- Lambda source code
+- Monitoring configuration
+- IAM policy configuration
+- Architecture diagrams
 
-Recommended Storage
+Recommended storage:
 
-- GitHub Repository
-- Local Computer
-- Cloud Storage
+- GitHub repository
+- Local backup
 
----
-
-# 13. Source Code Backup
-
-The following source code should be maintained under version control.
-
-- Lambda Python Code
-- IAM Policy JSON
-- CloudWatch Agent Configuration
-- Deployment Scripts
-
-Recommended Repository
-
-GitHub
-
-Benefits
-
-- Version history
-- Collaboration
-- Easy recovery
-- Secure storage
+Maintaining version history ensures that the project can be reconstructed after accidental loss or configuration changes.
 
 ---
 
-# 14. Recovery Objectives
+# 13. Recovery Objectives
 
 ## Recovery Time Objective (RTO)
 
-Definition
+RTO represents the maximum acceptable time required to restore a service or capability after a failure.
 
-Maximum acceptable time required to restore the service after a failure.
-
-Project Target
-
-| Component | Target RTO |
-|-----------|------------|
-| Apache Service | Less than 2 Minutes |
-| Lambda Function | Less than 5 Minutes |
-| CloudWatch Dashboard | Less than 10 Minutes |
-| Complete Environment | Less than 30 Minutes |
+| Recovery Area | Target RTO |
+| -------------- | ---------- |
+| P1 HTTPD service | Within a few minutes through automated remediation |
+| P2 CPU automation | Within a few minutes through the configured automation workflow |
+| Monitoring capability | Within 10 minutes |
+| Automation capability | Within 15 minutes |
+| Complete project environment | Within 30 minutes |
 
 ---
 
 ## Recovery Point Objective (RPO)
 
-Definition
+RPO represents the maximum acceptable loss of configuration or project data.
 
-Maximum acceptable amount of data loss.
-
-Project Target
-
-| Component | Target RPO |
-|-----------|------------|
-| Monitoring Configuration | Zero Configuration Loss |
-| Lambda Code | Zero Data Loss |
-| IAM Policy | Zero Data Loss |
-| Documentation | Zero Data Loss |
+| Recovery Area | Target RPO |
+| ------------- | ---------- |
+| Automation source code | No intentional loss |
+| Monitoring configuration | No intentional loss |
+| IAM configuration | No intentional loss |
+| Project documentation | No intentional loss |
+| Dashboard and alarm configuration | No intentional loss |
 
 ---
 
-# 15. Disaster Scenarios
+# 14. Disaster Scenarios
 
-## Scenario 1
+## Scenario 1 – P1 HTTPD Service Failure
 
-### Apache Service Failure
+### Impact
 
-Impact
+The Apache web service becomes unavailable.
 
-Website becomes unavailable.
+### Recovery
 
-Recovery
+The monitoring and automation workflow detects the HTTPD failure and initiates the configured automated remediation process.
 
-- CloudWatch detects failure.
-- Alarm enters ALARM state.
-- SNS publishes notification.
-- Lambda executes automatically.
-- Systems Manager restarts Apache.
-- Success email is sent.
+The service is restored and the operations team is notified of the remediation result.
 
-Recovery Type
+### Recovery Type
 
 Automatic
 
 ---
 
-## Scenario 2
+## Scenario 2 – P2 High CPU Condition
 
-### CloudWatch Agent Failure
+### Impact
 
-Impact
+High CPU utilization may affect application performance and system responsiveness.
 
-Metrics stop updating.
+### Recovery
 
-Recovery
+The monitoring workflow detects the configured CPU condition and initiates the P2 automation process.
 
-- Restart CloudWatch Agent.
-- Reload configuration.
-- Verify metrics in CloudWatch Dashboard.
+The remediation result is recorded and the operations team is notified according to the configured workflow.
 
-Recovery Type
+### Recovery Type
+
+Automated
+
+---
+
+## Scenario 3 – Monitoring Failure
+
+### Impact
+
+Monitoring data may stop updating and incidents may not be detected correctly.
+
+### Recovery
+
+- Verify the monitoring agent.
+- Restore the approved monitoring configuration.
+- Restart the monitoring agent.
+- Confirm that metrics are being published.
+- Validate alarm operation.
+
+### Recovery Type
 
 Manual
 
 ---
 
-## Scenario 3
+## Scenario 4 – Automation Failure
 
-### Lambda Failure
+### Impact
 
-Impact
+Automatic remediation may not execute.
 
-Auto-remediation stops.
+### Recovery
 
-Recovery
+- Review Lambda execution logs.
+- Verify IAM permissions.
+- Verify the notification and automation integration.
+- Restore the approved source code if required.
+- Deploy the corrected version using the established deployment process.
+- Perform a controlled validation test.
 
-- Review CloudWatch Logs.
-- Fix Lambda code.
-- Redeploy function.
-- Perform validation test.
-
-Recovery Type
-
-Manual
-
----
-
-## Scenario 4
-
-### EC2 Instance Failure
-
-Impact
-
-Complete application becomes unavailable.
-
-Recovery
-
-- Launch a new EC2 instance from the latest AMI.
-- Attach the IAM role.
-- Install or restore CloudWatch Agent configuration.
-- Verify SSM registration.
-- Validate monitoring and automation.
-
-Recovery Type
+### Recovery Type
 
 Manual
 
 ---
 
-## Scenario 5
+## Scenario 5 – EC2 Infrastructure Failure
 
-### IAM Role Misconfiguration
+### Impact
 
-Impact
+The hosted application and monitoring environment become unavailable.
 
-CloudWatch or Systems Manager stops functioning.
+### Recovery
 
-Recovery
+1. Launch a replacement instance or restore from the latest suitable AMI.
+2. Restore the required application configuration.
+3. Attach the required IAM permissions.
+4. Restore monitoring configuration.
+5. Verify Systems Manager connectivity.
+6. Validate CloudWatch monitoring.
+7. Validate the P1 and P2 automation workflows.
 
-- Restore the backed-up IAM policy.
-- Reattach the IAM role.
-- Restart CloudWatch Agent and SSM Agent if necessary.
-- Verify service communication.
-
-Recovery Type
+### Recovery Type
 
 Manual
 
 ---
 
-# 16. Recovery Procedures
+## Scenario 6 – IAM Configuration Failure
+
+### Impact
+
+Required AWS service interactions may stop functioning.
+
+### Recovery
+
+- Restore the approved IAM configuration.
+- Reattach the required role or permissions.
+- Verify service-to-service access.
+- Revalidate monitoring and automation.
+
+### Recovery Type
+
+Manual
+
+---
+
+# 15. Recovery Procedures
 
 ## Application Recovery
 
-1. Verify EC2 status.
-2. Check Apache service.
-3. Restart Apache if required.
-4. Validate application availability.
+1. Verify the EC2 environment.
+2. Check the Apache service.
+3. Restore or restart the service if required.
+4. Confirm application availability.
+5. Validate monitoring.
 
 ---
 
 ## Monitoring Recovery
 
-1. Verify CloudWatch Agent.
-2. Reload agent configuration.
-3. Confirm metrics are visible.
-4. Validate dashboard.
+1. Verify the monitoring agent.
+2. Restore the approved configuration.
+3. Restart the agent.
+4. Confirm metrics are visible.
+5. Validate the P1 HTTPD and P2 CPU monitoring conditions.
 
 ---
 
 ## Automation Recovery
 
-1. Verify SNS Topic.
-2. Verify Lambda function.
-3. Verify Systems Manager.
-4. Execute a test incident.
-5. Confirm automatic remediation.
+1. Verify the notification integration.
+2. Verify the Lambda function.
+3. Verify IAM permissions.
+4. Verify Systems Manager access where applicable.
+5. Execute a controlled test.
+6. Confirm that the required automation workflow completes successfully.
 
 ---
 
-# 17. Disaster Recovery Workflow
+# 16. Disaster Recovery Workflow
 
-```
+For normal application incidents:
+
+```text
 Failure Occurs
-
-↓
-
-CloudWatch Detection
-
-↓
-
-Alarm Triggered
-
-↓
-
-SNS Notification
-
-↓
-
-Lambda Function
-
-↓
-
-Systems Manager
-
-↓
-
-Restart Apache
-
-↓
-
+      ↓
+Monitoring Detection
+      ↓
+Incident Condition Identified
+      ↓
+P1 HTTPD or P2 CPU Workflow
+      ↓
+Configured Automated Remediation
+      ↓
 Verification
-
-↓
-
-Service Restored
-
-↓
-
-Engineer Notification
+      ↓
+Operations Notification
+      ↓
+Service / Condition Restored
 ```
 
-If infrastructure recovery is required:
+For infrastructure-level recovery:
 
-```
+```text
 Infrastructure Failure
-
-↓
-
-Launch New EC2 Instance
-
-↓
-
-Attach IAM Role
-
-↓
-
-Restore Configuration
-
-↓
-
-Verify CloudWatch
-
-↓
-
-Verify Systems Manager
-
-↓
-
-Deploy Lambda
-
-↓
-
-Create Dashboard
-
-↓
-
-Validate Monitoring
-
-↓
-
-Project Restored
+      ↓
+Assess Impact
+      ↓
+Restore or Launch Replacement Environment
+      ↓
+Restore IAM Configuration
+      ↓
+Restore Monitoring Configuration
+      ↓
+Restore Automation
+      ↓
+Validate CloudWatch Monitoring
+      ↓
+Validate P1 and P2 Workflows
+      ↓
+Operational Recovery Complete
 ```
 
 ---
 
-# 18. Testing the Recovery Plan
+# 17. Recovery Testing
 
-Recovery testing should be performed periodically.
+Recovery testing should verify both automated remediation and restoration procedures.
 
-Recommended Tests
+### P1 HTTPD Test
 
-- Stop Apache service.
-- Verify CloudWatch Alarm.
-- Verify SNS notification.
-- Verify Lambda execution.
-- Verify Systems Manager command.
-- Confirm Apache restart.
-- Confirm success email.
+- Stop the Apache service.
+- Confirm the monitoring condition is detected.
+- Confirm automated remediation is initiated.
+- Confirm Apache is restored.
+- Confirm the operational notification.
 
-Expected Result
+### P2 CPU Test
 
-The service should recover automatically without manual intervention.
+- Generate the configured CPU condition in a controlled test.
+- Confirm the monitoring condition is detected.
+- Confirm the P2 automation workflow is initiated.
+- Verify the remediation result.
+- Confirm the operational notification.
 
----
+### Infrastructure Recovery Test
 
-# 19. Best Practices
-
-The following practices are recommended:
-
-- Maintain updated AMI backups.
-- Store configuration files in version control.
-- Backup IAM policies.
-- Keep project documentation current.
-- Test disaster recovery regularly.
-- Monitor backup integrity.
-- Review recovery procedures periodically.
+- Validate restoration of the EC2 environment.
+- Validate monitoring configuration.
+- Validate IAM permissions.
+- Validate automation.
+- Confirm end-to-end operational readiness.
 
 ---
 
-# 20. Conclusion
+# 18. Best Practices
 
-The Backup and Disaster Recovery strategy ensures that the CloudOps NOC Automation solution can recover efficiently from both application-level and infrastructure-level failures.
+The following practices should be maintained:
 
-Automatic remediation handles Apache service failures using Amazon CloudWatch, Amazon SNS, AWS Lambda, and AWS Systems Manager, significantly reducing downtime. Configuration backups, infrastructure documentation, and source code version control enable rapid restoration of the complete environment when required.
+- Keep approved infrastructure backups current.
+- Store automation source code in version control.
+- Maintain monitoring configuration backups.
+- Maintain IAM policy backups.
+- Keep project documentation updated.
+- Test recovery procedures periodically.
+- Validate both P1 and P2 automation workflows.
+- Review recovery procedures after major configuration changes.
+- Do not reintroduce excluded P3 or unknown-service automation into the project scope.
 
-The implemented strategy improves operational resilience, supports business continuity, and follows AWS operational best practices for infrastructure recovery and service availability.
+---
+
+# 19. Conclusion
+
+The Backup and Disaster Recovery Plan provides a structured approach for recovering the CloudOps NOC Automation solution from application, monitoring, automation, and infrastructure failures.
+
+The finalized recovery scope covers **P1 HTTPD service automation** and **P2 CPU utilization automation**. Automated remediation is used where the configured workflow supports it, while documented recovery procedures provide a controlled method for restoring the environment when manual intervention is required.
+
+Maintaining configuration backups, source-code version control, infrastructure recovery options, and regular recovery testing improves operational resilience and supports reliable restoration of the CloudOps NOC environment.
