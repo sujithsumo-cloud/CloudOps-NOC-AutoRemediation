@@ -3,301 +3,970 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NOC:// CloudOps Auto-Remediation</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>CloudOps NOC V2.0 — Self-Healing Infrastructure</title>
+
 <style>
-  :root{
-    --bg: #0A0E14;
-    --panel: #121821;
-    --panel-2: #161D28;
-    --border: #232C38;
-    --text: #E6EDF3;
-    --muted: #7C8B9B;
-    --ok: #39D98A;
-    --alarm: #FF5C5C;
-    --amber: #FFB020;
-    --mono: 'JetBrains Mono', monospace;
-    --sans: 'Space Grotesk', sans-serif;
-  }
-  *{box-sizing:border-box; margin:0; padding:0;}
-  html{scroll-behavior:smooth;}
-  body{
-    background:var(--bg);
-    color:var(--text);
-    font-family:var(--sans);
-    line-height:1.5;
-    background-image:
-      radial-gradient(circle at 15% 8%, rgba(57,217,138,0.06), transparent 40%),
-      radial-gradient(circle at 85% 20%, rgba(255,176,32,0.05), transparent 45%);
-  }
-  a{color:inherit;}
-  ::selection{background:var(--ok); color:#04140C;}
-  :focus-visible{outline:2px solid var(--ok); outline-offset:2px;}
+:root{
+  --bg:#070b12;
+  --panel:#0d1420;
+  --panel2:#111b2a;
+  --line:#24354b;
+  --text:#e8eef7;
+  --muted:#91a0b4;
+  --dim:#5f7188;
+  --blue:#58a6ff;
+  --cyan:#55d6d2;
+  --green:#3fb950;
+  --red:#ff6b6b;
+  --amber:#d9a441;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  --sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
 
-  .wrap{max-width:1080px; margin:0 auto; padding:0 28px;}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  background:
+    radial-gradient(circle at 75% 0%,#12233b 0,transparent 32%),
+    radial-gradient(circle at 10% 45%,rgba(37,75,120,.10),transparent 30%),
+    var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  line-height:1.55;
+}
+a{color:inherit;text-decoration:none}
+.wrap{width:min(1180px,calc(100% - 36px));margin:auto}
 
-  /* ---------- NAV ---------- */
-  nav{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:22px 28px; border-bottom:1px solid var(--border);
-    position:sticky; top:0; background:rgba(10,14,20,0.85); backdrop-filter:blur(8px);
-    z-index:10;
-  }
-  .logo{font-family:var(--mono); font-weight:700; font-size:15px; letter-spacing:0.5px;}
-  .logo span{color:var(--ok);}
-  .navlinks{display:flex; gap:28px; font-family:var(--mono); font-size:13px; color:var(--muted);}
-  .navlinks a{text-decoration:none; transition:color .15s;}
-  .navlinks a:hover{color:var(--text);}
-  .navlinks a::before{content:"# "; color:var(--ok);}
+/* TOP BAR */
+.top{
+  border-bottom:1px solid var(--line);
+  font:12px var(--mono);
+  color:var(--muted)
+}
+.top .wrap{
+  display:flex;
+  justify-content:space-between;
+  gap:16px;
+  padding:10px 0;
+  flex-wrap:wrap
+}
+.dot{
+  display:inline-block;
+  width:7px;height:7px;border-radius:50%;
+  background:var(--blue);
+  box-shadow:0 0 12px var(--blue);
+  margin-right:8px;
+  animation:pulse 1.8s ease-in-out infinite
+}
+@keyframes pulse{50%{opacity:.35}}
 
-  /* ---------- HERO ---------- */
-  header.hero{padding:72px 28px 56px;}
-  .status-line{
-    display:inline-flex; align-items:center; gap:9px;
-    font-family:var(--mono); font-size:12.5px; color:var(--ok);
-    border:1px solid rgba(57,217,138,0.35); background:rgba(57,217,138,0.07);
-    padding:6px 12px; border-radius:100px; margin-bottom:26px;
-  }
-  .dot{width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 0 0 rgba(57,217,138,.6); animation:pulse 2s infinite;}
-  @keyframes pulse{
-    0%{box-shadow:0 0 0 0 rgba(57,217,138,.55);}
-    70%{box-shadow:0 0 0 8px rgba(57,217,138,0);}
-    100%{box-shadow:0 0 0 0 rgba(57,217,138,0);}
-  }
-  h1{
-    font-size:clamp(34px, 5.4vw, 58px); font-weight:700; letter-spacing:-0.5px;
-    line-height:1.08; max-width:16ch;
-  }
-  h1 .accent{color:var(--ok);}
-  .hero-sub{color:var(--muted); font-size:16.5px; max-width:52ch; margin:22px 0 34px;}
-  .hero-grid{display:grid; grid-template-columns:1.1fr 0.9fr; gap:40px; align-items:start;}
-  @media (max-width:840px){ .hero-grid{grid-template-columns:1fr;} }
+/* NAV */
+nav{
+  border-bottom:1px solid var(--line);
+  background:rgba(7,11,18,.78);
+  backdrop-filter:blur(12px);
+  position:sticky;
+  top:0;
+  z-index:20
+}
+nav .wrap{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:16px 0
+}
+.brand{font:700 15px var(--mono);letter-spacing:.02em}
+.badge{
+  font:11px var(--mono);
+  border:1px solid var(--line);
+  padding:4px 8px;
+  border-radius:999px;
+  color:var(--cyan);
+  margin-left:8px
+}
+nav ul{
+  display:flex;
+  gap:24px;
+  list-style:none;
+  margin:0;padding:0;
+  color:var(--muted);
+  font-size:13px
+}
+nav li a:hover{color:var(--text)}
 
-  .metric-row{display:flex; gap:28px; flex-wrap:wrap;}
-  .metric{font-family:var(--mono);}
-  .metric b{display:block; font-size:26px; color:var(--text);}
-  .metric span{font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:0.6px;}
+/* HERO */
+.hero{padding:78px 0 70px;border-bottom:1px solid var(--line)}
+.hero-grid{
+  display:grid;
+  grid-template-columns:1.08fr .92fr;
+  gap:55px;
+  align-items:center
+}
+.kicker{
+  font:600 11px var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.13em;
+  color:var(--blue);
+  margin-bottom:14px
+}
+h1{
+  font-size:clamp(38px,5vw,64px);
+  line-height:1.02;
+  letter-spacing:-.045em;
+  margin:0 0 22px
+}
+h1 span{color:var(--blue)}
+.lede{font-size:17px;color:var(--muted);max-width:65ch;margin:0 0 28px}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.btn{
+  display:inline-block;
+  padding:11px 16px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  font:600 12px var(--mono)
+}
+.btn.primary{background:var(--blue);color:#06101d;border-color:var(--blue)}
+.btn:hover{transform:translateY(-1px)}
 
-  /* ---------- TERMINAL ---------- */
-  .terminal{
-    background:var(--panel); border:1px solid var(--border); border-radius:10px;
-    font-family:var(--mono); font-size:12.8px; overflow:hidden;
-    box-shadow:0 20px 50px -20px rgba(0,0,0,0.6);
-  }
-  .term-bar{
-    display:flex; align-items:center; gap:8px; padding:11px 14px;
-    border-bottom:1px solid var(--border); background:var(--panel-2);
-  }
-  .term-dot{width:9px; height:9px; border-radius:50%;}
-  .term-body{padding:16px 18px; min-height:236px;}
-  .term-line{color:var(--muted); white-space:pre; opacity:0; animation:appear .3s forwards;}
-  .term-line .tag{color:var(--amber);}
-  .term-line .ok{color:var(--ok);}
-  .term-line .err{color:var(--alarm);}
-  .cursor{display:inline-block; width:7px; height:14px; background:var(--ok); vertical-align:middle; animation:blink 1s step-end infinite;}
-  @keyframes blink{50%{opacity:0;}}
-  @keyframes appear{to{opacity:1;}}
+.stats{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;
+  margin-top:28px
+}
+@media(max-width:900px){ .stats{ grid-template-columns:repeat(2,1fr); } }
+.stat{
+  border:1px solid var(--line);
+  background:rgba(13,20,32,.7);
+  border-radius:10px;
+  padding:15px
+}
+.stat b{display:block;font:700 20px var(--mono);margin-bottom:3px}
+.stat span{
+  font-size:11px;
+  color:var(--dim);
+  text-transform:uppercase;
+  letter-spacing:.06em
+}
 
-  /* ---------- SECTIONS ---------- */
-  section{padding:64px 28px; border-top:1px solid var(--border);}
-  .eyebrow{font-family:var(--mono); font-size:12px; color:var(--amber); letter-spacing:1px; margin-bottom:10px;}
-  h2{font-size:clamp(24px,3vw,32px); font-weight:600; margin-bottom:14px;}
-  .section-sub{color:var(--muted); max-width:60ch; margin-bottom:44px;}
+/* CONSOLE PANEL */
+.panel{
+  background:linear-gradient(145deg,rgba(17,27,42,.96),rgba(9,15,24,.96));
+  border:1px solid var(--line);
+  border-radius:14px;
+  box-shadow:0 24px 70px rgba(0,0,0,.28)
+}
+.console{overflow:hidden}
+.console-head{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:12px 15px;
+  border-bottom:1px solid var(--line);
+  background:var(--panel2)
+}
+.circle{width:9px;height:9px;border-radius:50%}
+.console-title{margin-left:6px;color:var(--dim);font:11px var(--mono)}
+.console-body{
+  padding:20px;
+  font:12px/1.75 var(--mono);
+  min-height:310px;
+  color:#a9b8c9
+}
+.ok{color:var(--green)}
+.warn{color:var(--amber)}
+.crit{color:var(--red)}
+.blue{color:var(--blue)}
 
-  /* pipeline */
-  .pipeline{display:flex; align-items:center; gap:0; overflow-x:auto; padding-bottom:8px;}
-  .node{
-    flex:0 0 auto; text-align:center; min-width:108px; padding:0 6px;
-  }
-  .node-box{
-    width:56px; height:56px; margin:0 auto 10px; border-radius:14px;
-    display:flex; align-items:center; justify-content:center;
-    font-family:var(--mono); font-weight:700; font-size:13px;
-    border:1px solid var(--border); background:var(--panel);
-    position:relative;
-  }
-  .node-box.compute{color:#FFB27A; border-color:rgba(255,178,122,.35);}
-  .node-box.watch{color:#FF7FAE; border-color:rgba(255,127,174,.35);}
-  .node-box.msg{color:#7FD1FF; border-color:rgba(127,209,255,.35);}
-  .node-label{font-size:12px; color:var(--text);}
-  .node-sub{font-size:10.5px; color:var(--muted); font-family:var(--mono);}
-  .connector{flex:1 1 40px; height:2px; min-width:24px; background:linear-gradient(90deg, var(--border), var(--border));
-    position:relative; top:-30px; overflow:hidden;}
-  .connector::after{
-    content:""; position:absolute; top:0; left:-30%; width:30%; height:100%;
-    background:linear-gradient(90deg, transparent, var(--ok), transparent);
-    animation:travel 2.6s linear infinite;
-  }
-  @keyframes travel{0%{left:-30%;} 100%{left:130%;}}
+/* SECTIONS */
+section{padding:76px 0;border-bottom:1px solid var(--line)}
+.section-head{max-width:760px;margin-bottom:38px}
+.section-head h2{font-size:30px;letter-spacing:-.025em;margin:0 0 9px}
+.section-head p{color:var(--muted);margin:0}
 
-  /* how it works */
-  .steps{list-style:none; counter-reset:step;}
-  .step{
-    counter-increment:step; display:grid; grid-template-columns:52px 1fr; gap:18px;
-    padding:20px 0; border-bottom:1px solid var(--border);
-  }
-  .step:last-child{border-bottom:none;}
-  .step::before{
-    content:counter(step, decimal-leading-zero); font-family:var(--mono);
-    color:var(--ok); font-size:15px; font-weight:700; padding-top:2px;
-  }
-  .step h3{font-size:16.5px; font-weight:600; margin-bottom:4px;}
-  .step p{color:var(--muted); font-size:14.5px; max-width:64ch;}
+/* =========================================================
+   01 · ANIMATED ARCHITECTURE FLOW (EXACT ORIGINAL DESIGN)
+   ========================================================= */
+.arch-wrap{
+  position:relative;
+  padding:10px 0
+}
 
-  /* stack */
-  .chips{display:flex; flex-wrap:wrap; gap:10px;}
-  .chip{
-    font-family:var(--mono); font-size:12.5px; color:var(--text);
-    border:1px solid var(--border); background:var(--panel);
-    padding:8px 14px; border-radius:8px;
-  }
+.arch-row{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:16px;
+  align-items:stretch;
+  margin-bottom:12px
+}
 
-  footer{
-    padding:34px 28px; border-top:1px solid var(--border);
-    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;
-    color:var(--muted); font-family:var(--mono); font-size:12px;
-  }
-  footer a{text-decoration:underline; text-underline-offset:3px;}
+.arch-node{
+  min-height:150px;
+  padding:20px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:linear-gradient(145deg,rgba(18,30,47,.96),rgba(10,17,28,.96));
+  position:relative;
+  overflow:hidden;
+  box-shadow:0 10px 30px rgba(0,0,0,.12);
+}
 
-  @media (prefers-reduced-motion: reduce){
-    .dot, .cursor, .connector::after{animation:none;}
-    .term-line{opacity:1; animation:none;}
-  }
+.arch-node strong{display:block;margin-bottom:6px;font-size:16px;color:var(--text)}
+.arch-node small{color:var(--muted);font-size:12px;line-height:1.5}
+.arch-node .label{
+  font:600 10px var(--mono);
+  letter-spacing:.08em;
+  color:var(--dim);
+  text-transform:uppercase;
+  margin-bottom:10px
+}
+
+/* Horizontal Connector for Row 1 */
+.h-flow{
+  position:relative;
+  height:30px;
+  margin:0 0;
+}
+.h-flow svg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  overflow:visible
+}
+
+/* Vertical transition */
+.v-flow{
+  position:relative;
+  height:40px;
+  width:100%;
+}
+.v-flow .line{
+  position:absolute;
+  width:2px;
+  height:100%;
+  left:50%;
+  transform:translateX(-50%);
+  background:#25374d
+}
+.v-flow .light{
+  position:absolute;
+  width:4px;
+  height:18px;
+  left:50%;
+  transform:translateX(-50%);
+  background:linear-gradient(180deg,transparent,var(--blue),transparent);
+  box-shadow:0 0 10px var(--blue);
+  animation:verticalTravel 1.5s linear infinite
+}
+@keyframes verticalTravel{
+  0%{top:-20px;opacity:0}
+  15%{opacity:1}
+  100%{top:100%;opacity:0}
+}
+
+/* SVG Line Paths */
+.track{fill:none;stroke:#25374d;stroke-width:2}
+.pulse{
+  fill:none;
+  stroke:url(#cyanGradient);
+  stroke-width:3;
+  stroke-linecap:round;
+  stroke-dasharray:2 20;
+  animation:travel 1.7s linear infinite;
+  filter:drop-shadow(0 0 6px rgba(88,166,255,.9))
+}
+@keyframes travel{to{stroke-dashoffset:-22}}
+
+/* Branch Area */
+.branch-area{
+  position:relative;
+  max-width:900px;
+  margin:auto
+}
+.branch-svg{
+  display:block;
+  width:100%;
+  height:80px;
+  overflow:visible
+}
+.branch-row{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px
+}
+
+.card-p1{
+  padding:22px;
+  border:1px solid var(--red);
+  background:rgba(255,107,107,.03);
+  border-radius:12px;
+}
+.card-p2{
+  padding:22px;
+  border:1px solid var(--amber);
+  background:rgba(217,164,65,.03);
+  border-radius:12px;
+}
+.card-p1 h3{font-size:16px;margin:0 0 8px;color:var(--red)}
+.card-p2 h3{font-size:16px;margin:0 0 8px;color:var(--amber)}
+.card-p1 p, .card-p2 p{font-size:12px;color:var(--muted);margin:0}
+
+.return-flow{
+  height:80px;
+  position:relative;
+  max-width:900px;
+  margin:auto
+}
+.return-flow svg{width:100%;height:100%;overflow:visible}
+
+.endpoint{fill:var(--blue);filter:drop-shadow(0 0 6px var(--blue))}
+.endpoint-red{fill:var(--red);filter:drop-shadow(0 0 6px var(--red))}
+.endpoint-amber{fill:var(--amber);filter:drop-shadow(0 0 6px var(--amber))}
+
+/* 02 · INCIDENT MODEL CARDS */
+.incident-grid{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:18px;
+}
+.inc-card{
+  border:1px solid var(--line);
+  background:rgba(13,20,32,.85);
+  border-radius:10px;
+  overflow:hidden;
+  font-family:var(--mono);
+}
+.inc-card-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:12px 16px;
+  font-weight:700;
+  font-size:12px;
+  letter-spacing:.05em;
+  border-bottom:1px solid var(--line);
+}
+.inc-card-header.detected{
+  background:rgba(217,164,65,.1);
+  color:var(--amber);
+  border-top:2px solid var(--amber);
+}
+.inc-card-header.resolved{
+  background:rgba(63,185,80,.1);
+  color:var(--green);
+  border-top:2px solid var(--green);
+}
+.inc-card-header.escalated{
+  background:rgba(255,107,107,.1);
+  color:var(--red);
+  border-top:2px solid var(--red);
+}
+.inc-card-body{padding:16px}
+.inc-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:8px 0;
+  border-bottom:1px dashed rgba(36,53,75,.6);
+  font-size:12px;
+}
+.inc-row:last-child{border-bottom:none}
+.inc-label{color:var(--dim)}
+.inc-val{color:var(--text);font-weight:600;text-align:right}
+.inc-val.highlight{color:var(--blue)}
+.inc-val.active{color:var(--green)}
+.inc-val.failed{color:var(--red)}
+
+/* 03 · EXECUTION LIFECYCLE */
+.lifecycle{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+.step{
+  border:1px solid var(--line);
+  background:var(--panel);
+  padding:20px;
+  min-height:155px
+}
+.step:first-child{border-radius:12px 0 0 12px}
+.step:last-child{border-radius:0 12px 12px 0}
+.step .num{font:700 11px var(--mono);color:var(--blue);margin-bottom:14px}
+.step h3{font-size:14px;margin:0 0 7px}
+.step p{font-size:12px;color:var(--muted);margin:0}
+
+/* =========================================================
+   04 · AWS SERVICE MAP (UPDATED SPECIFIC SEQUENCE)
+   ========================================================= */
+.map-container{
+  background:rgba(13,20,32,.6);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:40px 20px;
+  overflow-x:auto;
+}
+.map-pipeline{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  min-width:1000px;
+  position:relative;
+  padding:0 10px;
+}
+
+.node{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+  position:relative;
+  z-index:2;
+  width:95px;
+}
+.node-icon{
+  width:54px;
+  height:54px;
+  border-radius:12px;
+  background:linear-gradient(145deg,#121c2b,#09101a);
+  border:1px solid #2d425c;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font:700 13px var(--mono);
+  color:var(--blue);
+  box-shadow:0 6px 18px rgba(0,0,0,.35);
+  transition:all .3s ease;
+}
+.node:hover .node-icon{
+  border-color:var(--cyan);
+  box-shadow:0 0 15px rgba(85,214,210,.3);
+  transform:translateY(-2px);
+}
+.node-title{
+  font:700 12px var(--mono);
+  color:var(--text);
+  margin-top:10px;
+}
+.node-subtitle{
+  font-size:11px;
+  color:var(--dim);
+  margin-top:2px;
+  font-family:var(--mono);
+}
+
+.connector{
+  flex:1;
+  height:2px;
+  background:#1a2838;
+  position:relative;
+  margin:0 -4px;
+  top:-16px;
+  z-index:1;
+}
+.connector::after{
+  content:'';
+  position:absolute;
+  top:-1px;
+  left:0;
+  width:100%;
+  height:4px;
+  background:linear-gradient(90deg, transparent, var(--cyan), transparent);
+  background-size:200% 100%;
+  animation:lineFlow 2s linear infinite;
+  box-shadow:0 0 8px var(--cyan);
+}
+@keyframes lineFlow{
+  0%{background-position:200% 0}
+  100%{background-position:-200% 0}
+}
+
+/* 05 · TABLE */
+.table{width:100%;border-collapse:collapse;font-size:12px}
+.table th,.table td{
+  padding:13px 12px;
+  border-bottom:1px solid var(--line);
+  text-align:left
+}
+.table th{
+  font:600 11px var(--mono);
+  color:var(--dim);
+  text-transform:uppercase
+}
+.table td{color:var(--muted)}
+.table td:first-child{color:var(--text);font-weight:600}
+
+/* FOOTER */
+footer{padding:34px 0;color:var(--dim);font:11px var(--mono)}
+footer .wrap{
+  display:flex;
+  justify-content:space-between;
+  gap:20px;
+  flex-wrap:wrap
+}
+
+@media(max-width:900px){
+  .hero-grid{grid-template-columns:1fr}
+  .arch-row{grid-template-columns:1fr 1fr}
+  .incident-grid{grid-template-columns:1fr}
+  .lifecycle{grid-template-columns:1fr 1fr}
+}
+@media(max-width:650px){
+  nav ul{display:none}
+  .stats,.arch-row,.lifecycle{grid-template-columns:1fr}
+}
 </style>
 </head>
+
 <body>
 
+<!-- Gradient definitions for animated lines -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="cyanGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#58a6ff" stop-opacity="0"/>
+      <stop offset="35%" stop-color="#58a6ff"/>
+      <stop offset="65%" stop-color="#58a6ff"/>
+      <stop offset="100%" stop-color="#58a6ff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div class="top">
+  <div class="wrap">
+    <div><span class="dot"></span>PROJECT STATUS · CLOUDOPS NOC V2.0</div>
+    <div>REGION · AP-SOUTH-1 · SCOPE · P1 / P2</div>
+  </div>
+</div>
+
 <nav>
-  <div class="logo">NOC<span>://</span>cloudops</div>
-  <div class="navlinks">
-    <a href="#pipeline">pipeline</a>
-    <a href="#how">how-it-works</a>
-    <a href="#stack">stack</a>
+  <div class="wrap">
+    <div class="brand">CLOUDOPS<span style="color:var(--dim)">/</span>NOC <span class="badge">V2.0</span></div>
+    <ul>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#incidents">Incidents</a></li>
+      <li><a href="#flow">Execution</a></li>
+      <li><a href="#aws-map">AWS Map</a></li>
+      <li><a href="#evidence">Evidence</a></li>
+    </ul>
   </div>
 </nav>
 
-<header class="hero wrap">
-  <div class="status-line"><span class="dot"></span> SYSTEM STATUS: OPERATIONAL &nbsp;·&nbsp; region ap-south-1</div>
-  <div class="hero-grid">
+<!-- HERO -->
+<header class="hero" id="overview">
+  <div class="wrap hero-grid">
     <div>
-      <h1>Apache goes down.<br>Nobody gets <span class="accent">paged.</span></h1>
-      <p class="hero-sub">A self-healing NOC pipeline on AWS: CloudWatch watches the httpd process, an alarm fires into SNS, Lambda restarts it through SSM, and the on-call inbox finds out after it's already fixed.</p>
-      <div class="metric-row">
-        <div class="metric"><b>&lt;60s</b><span>Detection window</span></div>
-        <div class="metric"><b>~90s</b><span>Auto remediation</span></div>
-        <div class="metric"><b>0</b><span>Manual logins required</span></div>
+      <div class="kicker">AWS-based NOC automation</div>
+      <h1>Your Server Fails.<br><span>It Fixes Itself.</span></h1>
+      <p class="lede">
+        CloudOps NOC V2.0 is a focused self-healing operations project.
+        CloudWatch detects actionable incidents, Lambda controls the workflow,
+        SSM executes the EC2-side operation, and SNS reports the final result.
+      </p>
+
+      <div class="actions">
+        <a class="btn primary" href="#architecture">Explore architecture</a>
+        <a class="btn" href="#aws-map">View AWS Service Map</a>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b>&lt;30s</b><span>Avg. Resolution Time</span></div>
+        <div class="stat"><b>3-stage</b><span>Verify Before Resolve</span></div>
+        <div class="stat"><b>P1 – P2</b><span>Per-Alarm Severity</span></div>
+        <div class="stat"><b>1 Retry</b><span>Before Escalation</span></div>
       </div>
     </div>
 
-    <div class="terminal" id="terminal">
-      <div class="term-bar">
-        <span class="term-dot" style="background:var(--alarm)"></span>
-        <span class="term-dot" style="background:var(--amber)"></span>
-        <span class="term-dot" style="background:var(--ok)"></span>
+    <div class="panel console">
+      <div class="console-head">
+        <span class="circle" style="background:#ff6b6b"></span>
+        <span class="circle" style="background:#d9a441"></span>
+        <span class="circle" style="background:#3fb950"></span>
+        <span class="console-title">cloudops-noc / incident-engine</span>
       </div>
-      <div class="term-body" id="termBody"></div>
+      <div class="console-body">
+        <div class="blue">CLOUDOPS NOC V2.0</div>
+        <div>────────────────────────────────────</div>
+        <div><span class="ok">[MONITOR]</span> Alarm event received</div>
+        <div><span class="warn">[GATE]</span> Checking actionable alarm</div>
+        <div><span class="blue">[CLASSIFY]</span> NOC-cloudops-automate → P1</div>
+        <div><span class="blue">[SSM]</span> Sending command to EC2</div>
+        <div><span class="ok">[VERIFY]</span> httpd is-active</div>
+        <div><span class="ok">[VERIFY]</span> 15s stability check passed</div>
+        <div><span class="ok">[NOTIFY]</span> SNS → confirmed subscriber</div>
+        <br>
+        <div class="ok">RESULT: RESOLVED</div>
+        <div style="color:var(--dim)">P2 path is diagnostic-only; no restart.</div>
+      </div>
     </div>
   </div>
 </header>
 
-<section id="pipeline">
+<!-- 01 · ARCHITECTURE (RESTORED EXACT ORIGINAL ANIMATED FLOW) -->
+<section id="architecture">
   <div class="wrap">
-    <div class="eyebrow">// architecture</div>
-    <h2>One incident, seven hops.</h2>
-    <p class="section-sub">Every restart follows the same fixed path — no branch, no queue, no human approval gate.</p>
+    <div class="section-head">
+      <div class="kicker">01 · Architecture</div>
+      <h2>The Self-Healing Architecture</h2>
+      <p>Watch the signal travel through the entire self-healing system topology, from detection to notification.</p>
+    </div>
 
-    <div class="pipeline">
-      <div class="node"><div class="node-box compute">EC2</div><div class="node-label">httpd</div><div class="node-sub">source</div></div>
-      <div class="connector"></div>
-      <div class="node"><div class="node-box watch">CW</div><div class="node-label">CloudWatch</div><div class="node-sub">procstat</div></div>
-      <div class="connector"></div>
-      <div class="node"><div class="node-box msg">SNS</div><div class="node-label">SNS Topic</div><div class="node-sub">cloudops-sns</div></div>
-      <div class="connector"></div>
-      <div class="node"><div class="node-box compute">λ</div><div class="node-label">Lambda</div><div class="node-sub">remediate</div></div>
-      <div class="connector"></div>
-      <div class="node"><div class="node-box watch">SSM</div><div class="node-label">Systems Mgr</div><div class="node-sub">RunCommand</div></div>
-      <div class="connector"></div>
-      <div class="node"><div class="node-box compute">EC2</div><div class="node-label">httpd</div><div class="node-sub">restarted</div></div>
-      <div class="connector"></div>
-      <div class="node"><div class="node-box msg">✉</div><div class="node-label">Inbox</div><div class="node-sub">result</div></div>
+    <div class="arch-wrap">
+      <!-- Top Row: VPC, EC2, CloudWatch, Lambda -->
+      <div class="arch-row">
+        <div class="arch-node">
+          <div class="label">01 · Network</div>
+          <strong>VPC</strong>
+          <small>Subnet, route table and security group provide the EC2 network boundary.</small>
+        </div>
+
+        <div class="arch-node">
+          <div class="label">02 · Workload</div>
+          <strong>EC2</strong>
+          <small>Amazon Linux workload with HTTPD, CloudWatch Agent and SSM Agent.</small>
+        </div>
+
+        <div class="arch-node">
+          <div class="label">03 · Monitor</div>
+          <strong>CloudWatch</strong>
+          <small>P1 procstat metric and P2 CPUUtilization alarm evaluation.</small>
+        </div>
+
+        <div class="arch-node">
+          <div class="label">04 · Controller</div>
+          <strong>Lambda</strong>
+          <small>Parses alarmData, gates actionable alarms and controls remediation.</small>
+        </div>
+      </div>
+
+      <!-- Horizontal connection line for Top Row -->
+      <div class="h-flow">
+        <svg viewBox="0 0 1000 30" preserveAspectRatio="none">
+          <path class="track" d="M125 15 H875"/>
+          <path class="pulse" d="M125 15 H875"/>
+          <circle class="endpoint" cx="125" cy="15" r="3"/>
+          <circle class="endpoint" cx="375" cy="15" r="3"/>
+          <circle class="endpoint" cx="625" cy="15" r="3"/>
+          <circle class="endpoint" cx="875" cy="15" r="3"/>
+        </svg>
+      </div>
+
+      <!-- Downward transition to P1/P2 split -->
+      <div class="v-flow">
+        <div class="line"></div>
+        <div class="light"></div>
+      </div>
+
+      <!-- Branching Area: P1 vs P2 -->
+      <div class="branch-area">
+        <svg class="branch-svg" viewBox="0 0 900 80" preserveAspectRatio="none">
+          <path class="track" d="M450 0 C450 30 225 30 225 80"/>
+          <path class="track" d="M450 0 C450 30 675 30 675 80"/>
+          <path class="pulse" d="M450 0 C450 30 225 30 225 80"/>
+          <path class="pulse" d="M450 0 C450 30 675 30 675 80" style="animation-delay:.5s"/>
+          <circle class="endpoint" cx="450" cy="0" r="3"/>
+          <circle class="endpoint-red" cx="225" cy="80" r="3"/>
+          <circle class="endpoint-amber" cx="675" cy="80" r="3"/>
+        </svg>
+
+        <div class="branch-row">
+          <div class="card-p1">
+            <div class="label" style="color:var(--red);font:600 10px var(--mono);margin-bottom:8px">05A · P1</div>
+            <h3>SSM — EC2 → HTTPD</h3>
+            <p>Restart httpd, verify service state, retry once if required, then perform the 15-second stability check.</p>
+          </div>
+
+          <div class="card-p2">
+            <div class="label" style="color:var(--amber);font:600 10px var(--mono);margin-bottom:8px">05B · P2</div>
+            <h3>Lambda diagnostics</h3>
+            <p>Collect CPU-oriented diagnostic information. The P2 path is intentionally diagnostic-only and does not restart the server.</p>
+          </div>
+        </div>
+
+        <!-- Return convergence down to SNS -->
+        <div class="return-flow">
+          <svg viewBox="0 0 900 80" preserveAspectRatio="none">
+            <path class="track" d="M225 0 C225 50 450 50 450 80"/>
+            <path class="track" d="M675 0 C675 50 450 50 450 80"/>
+            <path class="pulse" d="M225 0 C225 50 450 50 450 80" style="animation-delay:.8s"/>
+            <path class="pulse" d="M675 0 C675 50 450 50 450 80" style="animation-delay:1.2s"/>
+            <circle class="endpoint-red" cx="225" cy="0" r="3"/>
+            <circle class="endpoint-amber" cx="675" cy="0" r="3"/>
+            <circle class="endpoint" cx="450" cy="80" r="4"/>
+          </svg>
+        </div>
+
+        <div class="v-flow" style="height:25px">
+          <div class="line"></div>
+          <div class="light"></div>
+        </div>
+
+        <!-- Notification Box -->
+        <div class="arch-node" style="max-width:700px;margin:auto">
+          <div class="label">06 · NOTIFICATION</div>
+          <strong>SNS → Email notification</strong>
+          <small>Lambda publishes the incident outcome so the operator receives detected, resolved, or escalated status.</small>
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<section id="how">
+<!-- 02 · INCIDENT MODEL -->
+<section id="incidents">
   <div class="wrap">
-    <div class="eyebrow">// sequence</div>
-    <h2>What happens, in order.</h2>
-    <p class="section-sub">This is the actual order of operations inside the Lambda function — not a marketing sequence, the real one.</p>
+    <div class="section-head">
+      <div class="kicker">02 · Incident model</div>
+      <h2>Three honest outcomes</h2>
+      <p>
+        Every incident gets a sequential ID and a report that says exactly what happened — including when the fix didn't hold.
+      </p>
+    </div>
 
-    <ol class="steps">
-      <li class="step"><h3>Agent reports in</h3><p>The CloudWatch Agent on the instance publishes <code>procstat_lookup_pid_count</code> for httpd every 60 seconds, alongside CPU, memory, disk, and log data.</p></li>
-      <li class="step"><h3>Alarm evaluates</h3><p>When the pid count drops below 1 for one evaluation period — including when the process vanishes and no datapoint arrives at all — the alarm enters ALARM state.</p></li>
-      <li class="step"><h3>SNS fans out</h3><p>The alarm action publishes to a single SNS topic, which does two things at once: emails the raw alert, and invokes the remediation Lambda.</p></li>
-      <li class="step"><h3>Lambda runs the fix</h3><p>The function sends an SSM RunShellScript command: restart httpd, wait five seconds, check <code>systemctl is-active</code>.</p></li>
-      <li class="step"><h3>Lambda polls for the result</h3><p>Up to 20 attempts, 3 seconds apart, tolerating the brief window where the SSM agent hasn't registered the command yet.</p></li>
-      <li class="step"><h3>Outcome gets published</h3><p>Success publishes a resolved notice. A failed restart — or an SSM timeout — publishes an escalation with manual next steps instead.</p></li>
-    </ol>
-  </div>
-</section>
+    <div class="incident-grid">
+      <div class="inc-card">
+        <div class="inc-card-header detected">
+          <span>DETECTED</span>
+          <span>P1 · CRITICAL</span>
+        </div>
+        <div class="inc-card-body">
+          <div class="inc-row">
+            <span class="inc-label">Incident</span>
+            <span class="inc-val">INC-20260807-0005</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Metric</span>
+            <span class="inc-val highlight">procstat_lookup_pid_count</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Threshold</span>
+            <span class="inc-val">&lt; 1</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Status</span>
+            <span class="inc-val">Remediation Initiated</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Manual Action</span>
+            <span class="inc-val" style="color:var(--amber)">Pending</span>
+          </div>
+        </div>
+      </div>
 
-<section id="stack">
-  <div class="wrap">
-    <div class="eyebrow">// built with</div>
-    <h2>Stack</h2>
-    <p class="section-sub" style="margin-bottom:22px;">Native AWS services only — nothing third-party in the loop.</p>
-    <div class="chips">
-      <span class="chip">EC2 · Amazon Linux 2023</span>
-      <span class="chip">CloudWatch Agent</span>
-      <span class="chip">CloudWatch Alarms</span>
-      <span class="chip">Amazon SNS</span>
-      <span class="chip">AWS Lambda · Python 3.12</span>
-      <span class="chip">AWS Systems Manager</span>
-      <span class="chip">IAM · scoped inline policies</span>
+      <div class="inc-card">
+        <div class="inc-card-header resolved">
+          <span>RESOLVED</span>
+          <span>25.2s</span>
+        </div>
+        <div class="inc-card-body">
+          <div class="inc-row">
+            <span class="inc-label">Incident</span>
+            <span class="inc-val">INC-20260807-0005</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Automation</span>
+            <span class="inc-val">Lambda + SSM</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Verify #1</span>
+            <span class="inc-val active">active</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Verify #2 (+15s)</span>
+            <span class="inc-val active">active</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Manual Action</span>
+            <span class="inc-val active">Not Required</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="inc-card">
+        <div class="inc-card-header escalated">
+          <span>ESCALATED</span>
+          <span>Manual</span>
+        </div>
+        <div class="inc-card-body">
+          <div class="inc-row">
+            <span class="inc-label">Incident</span>
+            <span class="inc-val">INC-20260806-0002</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Verify #1</span>
+            <span class="inc-val failed">inactive</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Cause</span>
+            <span class="inc-val highlight">start-limit-hit</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Status</span>
+            <span class="inc-val failed">Failed — Escalated</span>
+          </div>
+          <div class="inc-row">
+            <span class="inc-label">Manual Action</span>
+            <span class="inc-val failed">Required</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<footer class="wrap">
-  <span>NOC Auto-Remediation — CloudOps project, ap-south-1</span>
-  <span><a href="#">GitHub repository</a></span>
+<!-- 03 · EXECUTION -->
+<section id="flow">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">03 · Execution</div>
+      <h2>End-to-end P1 execution</h2>
+      <p>Detection, controlled action, verification and honest escalation.</p>
+    </div>
+
+    <div class="lifecycle">
+      <div class="step">
+        <div class="num">01 · DETECT</div>
+        <h3>Alarm becomes actionable</h3>
+        <p>CloudWatch evaluates the P1 procstat metric and sends the direct alarm event to Lambda.</p>
+      </div>
+      <div class="step">
+        <div class="num">02 · DECIDE</div>
+        <h3>Lambda validates</h3>
+        <p>Lambda parses alarm payload, applies actionable-alarm gating and maps the alarm to P1.</p>
+      </div>
+      <div class="step">
+        <div class="num">03 · REMEDIATE</div>
+        <h3>SSM executes</h3>
+        <p>SSM runs the HTTPD restart command on the managed EC2 instance with immediate verification.</p>
+      </div>
+      <div class="step">
+        <div class="num">04 · PROVE</div>
+        <h3>Stability + notification</h3>
+        <p>Lambda verifies stability before SNS reports the final result to subscriber topics.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 · AWS SERVICE MAP (UPDATED TO EXACT REQUESTED FLOW) -->
+<section id="aws-map">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">04 · AWS SERVICE MAP</div>
+      <h2>One incident, eight hops.</h2>
+      <p>Every restart follows the exact execution sequence from event trigger to final notification.</p>
+    </div>
+
+    <div class="map-container">
+      <div class="map-pipeline">
+        
+        <!-- 1. EC2 -->
+        <div class="node">
+          <div class="node-icon">EC2</div>
+          <div class="node-title">EC2</div>
+          <div class="node-subtitle">source</div>
+        </div>
+
+        <div class="connector"></div>
+
+        <!-- 2. CloudWatch -->
+        <div class="node">
+          <div class="node-icon">CW</div>
+          <div class="node-title">CloudWatch</div>
+          <div class="node-subtitle">Alarm Event</div>
+        </div>
+
+        <div class="connector"></div>
+
+        <!-- 3. Lambda -->
+        <div class="node">
+          <div class="node-icon" style="color:var(--amber)">λ</div>
+          <div class="node-title">Lambda</div>
+          <div class="node-subtitle">SSM Command</div>
+        </div>
+
+        <div class="connector"></div>
+
+        <!-- 4. SSM -->
+        <div class="node">
+          <div class="node-icon">SSM</div>
+          <div class="node-title">SSM</div>
+          <div class="node-subtitle">RunCommand</div>
+        </div>
+
+        <div class="connector"></div>
+
+        <!-- 5. EC2 HTTPD -->
+        <div class="node">
+          <div class="node-icon">EC2</div>
+          <div class="node-title">EC2</div>
+          <div class="node-subtitle">HTTPD</div>
+        </div>
+
+        <div class="connector"></div>
+
+        <!-- 6. Lambda -->
+        <div class="node">
+          <div class="node-icon" style="color:var(--amber)">λ</div>
+          <div class="node-title">Lambda</div>
+          <div class="node-subtitle">Publish Result</div>
+        </div>
+
+        <div class="connector"></div>
+
+        <!-- 7. SNS -->
+        <div class="node">
+          <div class="node-icon">SNS</div>
+          <div class="node-title">SNS</div>
+          <div class="node-subtitle">Topic</div>
+        </div>
+
+        <div class="connector"></div>
+
+        <!-- 8. Operator -->
+        <div class="node">
+          <div class="node-icon" style="color:var(--cyan)">✉</div>
+          <div class="node-title">Operator</div>
+          <div class="node-subtitle">Recipient</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 · EVIDENCE -->
+<section id="evidence">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="kicker">05 · Evidence</div>
+      <h2>What should be visible in a real project demo</h2>
+      <p>Use AWS evidence instead of fake live numbers.</p>
+    </div>
+
+    <div class="panel" style="overflow:auto">
+      <table class="table">
+        <thead>
+          <tr><th>Area</th><th>Evidence</th><th>Why it matters</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>P1 detection</td><td>procstat_lookup_pid_count → NOC-cloudops-automate</td><td>Proves HTTPD process monitoring is configured.</td></tr>
+          <tr><td>P2 detection</td><td>CPUUtilization → cpu alert</td><td>Proves CPU monitoring is separated from P1.</td></tr>
+          <tr><td>Trigger</td><td>CloudWatch Alarm → Lambda</td><td>Confirms the direct trigger design.</td></tr>
+          <tr><td>Remediation</td><td>SSM command history + EC2 service state</td><td>Proves Lambda caused a real EC2-side operation.</td></tr>
+          <tr><td>Verification</td><td>Initial check + retry + 15s stability check</td><td>Shows the automation does not declare success blindly.</td></tr>
+          <tr><td>Notification</td><td>SNS publish + received email</td><td>Connects the technical workflow to operator awareness.</td></tr>
+          <tr><td>Security</td><td>IAM policies and roles</td><td>Shows the automation is permission-controlled.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>CLOUDOPS-NOC-AUTOMATE · V2.0</div>
+    <div>IAM · EC2 · VPC · CLOUDWATCH · SNS · SSM · LAMBDA</div>
+  </div>
 </footer>
-
-<script>
-(function(){
-  var lines = [
-    {text:'[12:51:03] ', tag:'', rest:'procstat_lookup_pid_count → 0', cls:'err'},
-    {text:'[12:51:04] ', tag:'ALARM  ', rest:'cloudops-pid-count → ALARM'},
-    {text:'[12:51:05] ', tag:'SNS    ', rest:'publish → cloudops-sns'},
-    {text:'[12:51:05] ', tag:'LAMBDA ', rest:'noc-auto-remediation invoked'},
-    {text:'[12:51:06] ', tag:'SSM    ', rest:'send_command: restart httpd'},
-    {text:'[12:51:14] ', tag:'SSM    ', rest:'is-active → active', cls:'ok'},
-    {text:'[12:51:15] ', tag:'SNS    ', rest:'INCIDENT RESOLVED — no action needed', cls:'ok'},
-  ];
-  var body = document.getElementById('termBody');
-  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  function render(){
-    body.innerHTML = '';
-    lines.forEach(function(l, i){
-      var div = document.createElement('div');
-      div.className = 'term-line' + (l.cls ? ' ' + l.cls : '');
-      div.style.animationDelay = reduce ? '0s' : (i * 0.45) + 's';
-      var tagSpan = l.tag ? '<span class="tag">'+l.tag+'</span>' : '';
-      div.innerHTML = l.text + tagSpan + l.rest;
-      body.appendChild(div);
-    });
-    var cur = document.createElement('div');
-    cur.className = 'term-line';
-    cur.style.animationDelay = reduce ? '0s' : (lines.length * 0.45) + 's';
-    cur.innerHTML = '<span class="cursor"></span>';
-    body.appendChild(cur);
-  }
-  render();
-  if(!reduce){ setInterval(render, (lines.length * 450) + 3200); }
-})();
-</script>
 
 </body>
 </html>
