@@ -1,563 +1,1146 @@
-# Document 5 – Infrastructure Diagram
+# CloudOps NOC Automation V2.0 — Infrastructure
 
-## Project Title
+## Overview
 
-CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda and Systems Manager
+This document describes the infrastructure used in the **CloudOps NOC Automation V2.0** project.
 
----
+The project applies traditional **NOC operational principles** to an AWS cloud environment and demonstrates how predefined infrastructure incidents can be monitored, evaluated, remediated, verified, and escalated using AWS-native services.
 
-# Document Information
+The project supports two incident severities:
 
-| Item | Details |
-| --- | --- |
-| Document Name | Infrastructure Diagram |
-| Project | CloudOps NOC Automation |
-| Version | 2.0 |
-| Prepared By | Sujith |
-| Date | August 2026 |
-| Status | Final |
+* **P1 — HTTPD Failure:** Automated remediation and recovery verification.
+* **P2 — High CPU Utilization:** Automated diagnosis with manual operational review.
 
----
+The solution uses exactly seven AWS services:
 
-# 1. Purpose
-
-This document describes the AWS infrastructure used by the CloudOps NOC Automation solution and shows how the infrastructure components interact with the monitoring and incident-response workflow.
-
-The architecture supports two finalized NOC automation use cases:
-
-- **P1 – Apache HTTP Server (httpd) failure:** automatic remediation and recovery verification.
-- **P2 – CPU utilization above 50%:** automated diagnostic collection followed by manual review; no automatic CPU remediation is performed.
-
-The infrastructure uses AWS managed services to provide monitoring, event-driven incident handling, secure remote execution, logging, and operational notification.
+* Amazon EC2
+* Amazon VPC
+* Amazon CloudWatch
+* AWS Lambda
+* AWS Systems Manager
+* Amazon SNS
+* AWS IAM
 
 ---
 
-# 2. Infrastructure Overview
+# 1. Infrastructure Objective
 
-The solution is deployed in the AWS Asia Pacific (Mumbai) Region (`ap-south-1`).
+The infrastructure is designed to reduce unnecessary manual intervention in repetitive operational incidents.
 
-An Amazon EC2 instance named `cloudops-server` hosts the Apache HTTP Server. The CloudWatch Agent collects system and application-related metrics and publishes them to Amazon CloudWatch.
+Instead of requiring an engineer to manually detect, access, troubleshoot, remediate, and verify every known incident, the architecture provides a controlled event-driven workflow.
 
-CloudWatch alarms detect the two supported incident conditions:
+```text
+Detect
+   ↓
+Decide
+   ↓
+Act
+   ↓
+Verify
+   ↓
+Recover / Escalate
+```
 
-- `NOC-cloudops-automate` – P1 Apache service/process failure.
-- `cpu alert` – P2 CPU utilization greater than 50%.
+The objective is not to remove the operations engineer.
 
-When an alarm event is received, the Lambda function identifies the supported priority and executes the corresponding workflow.
-
-For P1, Lambda uses AWS Systems Manager Run Command to restart Apache and then performs a stability verification.
-
-For P2, Lambda uses Systems Manager to collect CPU diagnostic information. The diagnostic result is sent to the operations team for manual review. No automatic restart or destructive remediation is performed for CPU incidents.
+The objective is to automate safe and predictable operational actions while keeping engineers involved for unknown, unsafe, or unresolved incidents.
 
 ---
 
-# 3. Infrastructure Components
+# 2. High-Level Architecture
 
-| AWS Service / Component | Resource Name / Identifier | Purpose |
-| --- | --- | --- |
-| VPC | `cloudops-vpc` | Network boundary for the EC2 environment |
-| Public Subnet | `cloudops-subnet` | Hosts the EC2 instance |
-| Route Table | `cloudops-rt` | Provides subnet routing |
-| Internet Gateway | `cloudops-igw` | Internet connectivity |
-| Security Group | `cloudops-sg` | Network access control |
-| EC2 | `cloudops-server` | Hosts Apache and monitoring agents |
-| IAM Role | `cloudops-EC2-inline-role` | EC2 permissions for AWS services |
-| CloudWatch Agent | Installed on EC2 | Publishes system/application metrics |
-| CloudWatch Dashboard | `cloudops-NOC-dashboard` | Operational monitoring |
-| P1 CloudWatch Alarm | `NOC-cloudops-automate` | Detects Apache failure |
-| P2 CloudWatch Alarm | `cpu alert` | Detects CPU utilization > 50% |
-| SNS Topic | `cloudops-sns` | Notification and Lambda integration |
-| SNS Display Name | `NOC-topic` | Notification identity |
-| Lambda | `Cloudops-NOC-automate` | Incident detection and automation logic |
-| Systems Manager | `cloudops-server` managed node | Remote diagnostic/remediation execution |
-| CloudWatch Logs | Lambda and AWS service logs | Execution and troubleshooting visibility |
+```mermaid
+flowchart LR
+
+    EC2["EC2<br/>HTTPD + Agents"]
+
+    CW["Amazon CloudWatch<br/>Metrics + Alarms"]
+
+    LAMBDA["AWS Lambda<br/>Decision & Automation"]
+
+    SSM["AWS Systems Manager<br/>Run Command"]
+
+    SNS["Amazon SNS<br/>Notification / Escalation"]
+
+    OPS["CloudOps / NOC Engineer"]
+
+    EC2 -->|Metrics| CW
+
+    CW -->|Direct Alarm Event| LAMBDA
+
+    LAMBDA -->|Remediation / Diagnosis| SSM
+
+    SSM -->|Command via SSM Agent| EC2
+
+    LAMBDA -->|Result / Escalation| SNS
+
+    SNS -->|Notification| OPS
+```
+
+---
+
+# 3. AWS Services Used
+
+| AWS Service         | Role in the Project                                                          |
+| ------------------- | ---------------------------------------------------------------------------- |
+| **VPC**             | Provides the network foundation and isolation for the EC2 workload           |
+| **EC2**             | Hosts the Apache HTTPD web service and monitoring/management agents          |
+| **CloudWatch**      | Collects metrics, evaluates alarms, and detects incidents                    |
+| **Lambda**          | Parses alarm events, applies decision logic, and controls incident workflows |
+| **Systems Manager** | Executes controlled commands and diagnostics on EC2                          |
+| **SNS**             | Sends incident, recovery, diagnostic, and escalation notifications           |
+| **IAM**             | Controls permissions and service-to-service access                           |
 
 ---
 
 # 4. Infrastructure Layout
 
-```text
-                              AWS Cloud
-                                  │
-                         ap-south-1 (Mumbai)
-                                  │
-                    ┌─────────────┴─────────────┐
-                    │        cloudops-vpc        │
-                    │        10.0.0.0/16         │
-                    │                            │
-                    │   cloudops-subnet          │
-                    │      Public Subnet         │
-                    │            │                │
-                    │            ▼                │
-                    │     EC2: cloudops-server   │
-                    │     i-0b7d483631875bb1c     │
-                    │            │                │
-                    │     ┌──────┴──────┐         │
-                    │     │             │         │
-                    │  httpd       CW Agent       │
-                    │     │             │         │
-                    └─────┼─────────────┼─────────┘
-                          │             │
-                          │        CloudWatch
-                          │             │
-                          │     ┌───────┴────────┐
-                          │     │                │
-                          │   P1 Alarm         P2 Alarm
-                          │ NOC-cloudops-     cpu alert
-                          │   automate       CPU > 50%
-                          │     │                │
-                          └─────┴───────┬────────┘
-                                        │
-                                   SNS: cloudops-sns
-                                        │
-                              ┌─────────┴─────────┐
-                              │                   │
-                         Email Alert         Lambda
-                         NOC-topic       Cloudops-NOC-automate
-                                                  │
-                                           AWS Systems Manager
-                                                  │
-                                      ┌───────────┴───────────┐
-                                      │                       │
-                                  P1 Workflow             P2 Workflow
-                                      │                       │
-                              Restart httpd             Collect CPU
-                              + stability check         diagnostics
-                                      │                       │
-                                      └───────────┬───────────┘
-                                                  │
-                                           SNS Notifications
+```mermaid
+flowchart TB
+
+    subgraph AWS["AWS Cloud"]
+
+        IAM["IAM<br/>Roles & Permissions"]
+
+        subgraph VPC["VPC"]
+
+            IGW["Internet Gateway"]
+
+            RT["Route Table"]
+
+            subgraph SUBNET["Public Subnet"]
+
+                SG["Security Group"]
+
+                subgraph EC2["EC2 Instance"]
+
+                    HTTPD["Apache HTTPD"]
+
+                    CWA["CloudWatch Agent"]
+
+                    SSMA["SSM Agent"]
+
+                end
+
+            end
+
+        end
+
+        subgraph CW["Amazon CloudWatch"]
+
+            P1METRIC["procstat_lookup_pid_count"]
+
+            P1ALARM["P1 Alarm<br/>NOC-cloudops-automate"]
+
+            P2METRIC["CPUUtilization"]
+
+            P2ALARM["P2 Alarm<br/>cpu alert"]
+
+        end
+
+        LAMBDA["AWS Lambda"]
+
+        SSM["AWS Systems Manager"]
+
+        SNS["Amazon SNS"]
+
+    end
+
+    USER["User / Browser"]
+
+    OPS["CloudOps Engineer"]
+
+    USER --> IGW
+
+    IGW --> RT
+
+    RT --> SG
+
+    SG --> EC2
+
+    HTTPD --> CWA
+
+    CWA --> P1METRIC
+
+    P1METRIC --> P1ALARM
+
+    EC2 --> P2METRIC
+
+    P2METRIC --> P2ALARM
+
+    P1ALARM -->|Direct Alarm Event| LAMBDA
+
+    P2ALARM -->|Alarm Event| LAMBDA
+
+    LAMBDA --> SSM
+
+    SSM --> SSMA
+
+    SSMA --> EC2
+
+    LAMBDA --> SNS
+
+    SNS --> OPS
+
+    IAM -.-> EC2
+
+    IAM -.-> LAMBDA
+
+    IAM -.-> SSM
+
+    IAM -.-> SNS
 ```
 
 ---
 
-# 5. Network Architecture
+# 5. Network Infrastructure
 
-## 5.1 VPC
+## VPC
 
-| Property | Value |
-| --- | --- |
-| Name | `cloudops-vpc` |
-| CIDR Block | `10.0.0.0/16` |
-| Region | `ap-south-1` |
+The VPC provides the network boundary for the project.
 
-The VPC provides the network boundary for the EC2-based monitoring environment.
+```text
+AWS Region
+    ↓
+VPC
+    ↓
+Public Subnet
+    ↓
+EC2 Instance
+```
 
----
+The VPC contains:
 
-## 5.2 Public Subnet
-
-| Property | Value |
-| --- | --- |
-| Name | `cloudops-subnet` |
-| CIDR Block | `10.0.0.0/28` |
-| Type | Public |
-
-The subnet contains the EC2 instance used for the project.
-
----
-
-## 5.3 Internet Gateway
-
-| Property | Value |
-| --- | --- |
-| Name | `cloudops-igw` |
-| Purpose | Internet connectivity for the public subnet |
+* Public subnet
+* Route table
+* Internet Gateway
+* Security Group
+* EC2 instance
 
 ---
 
-## 5.4 Route Table
+## Public Subnet
 
-The public subnet uses a route to the Internet Gateway.
+The EC2 instance is deployed inside a public subnet.
 
-| Destination | Target |
-| --- | --- |
-| `0.0.0.0/0` | `cloudops-igw` |
+The subnet provides the network placement for the workload.
 
 ---
 
-## 5.5 Security Group
+## Internet Gateway
 
-| Property | Value |
-| --- | --- |
-| Name | `cloudops-sg` |
+The Internet Gateway provides internet connectivity for resources in the VPC when routing and security rules allow it.
 
-Inbound access includes:
-
-| Port | Protocol | Source | Purpose |
-| --- | --- | --- | --- |
-| 22 | SSH | My IP | Administrative access |
-| 80 | HTTP | Anywhere | Apache web access |
-
-Outbound traffic is allowed as configured for the project environment.
-
----
-
-# 6. Compute Layer
-
-The EC2 instance hosts the Apache HTTP Server and the agents required for monitoring and Systems Manager management.
-
-| Property | Value |
-| --- | --- |
-| Instance Name | `cloudops-server` |
-| Instance ID | `i-0b7d483631875bb1c` |
-| Operating System | Amazon Linux 2023 |
-| Instance Type | `t3.micro` |
-| IAM Role | `cloudops-EC2-inline-role` |
-| Availability Zone | `ap-south-1a` |
-| Private IP | `10.0.0.13` |
-
-Installed components include:
-
-- Apache HTTP Server (`httpd`)
-- Amazon CloudWatch Agent
-- AWS Systems Manager Agent
+```text
+Internet
+   ↓
+Internet Gateway
+   ↓
+VPC Routing
+   ↓
+EC2
+```
 
 ---
 
-# 7. Monitoring Layer
+## Route Table
 
-The CloudWatch Agent collects operating system and application-related metrics from the EC2 instance.
+The route table determines where network traffic should be forwarded.
 
-Configured monitoring includes:
+The public subnet contains a route similar to:
 
-- CPU utilization
-- Memory utilization
-- Disk usage
-- Disk I/O
-- Network traffic
-- Apache process status
-
-The metrics are published to Amazon CloudWatch.
-
-The monitoring data supports both the P1 Apache availability workflow and the P2 CPU utilization workflow.
+```text
+Destination: 0.0.0.0/0
+Target: Internet Gateway
+```
 
 ---
 
-# 8. Dashboard Layer
+## Security Group
 
-## CloudWatch Dashboard
+The Security Group acts as a stateful virtual firewall for the EC2 instance.
 
-Dashboard Name:
+Typical project access includes:
 
-`cloudops-NOC-dashboard`
+| Port | Protocol | Purpose                   |
+| ---- | -------- | ------------------------- |
+| 22   | TCP      | Administrative SSH access |
+| 80   | TCP      | HTTP / Apache web access  |
 
-The dashboard provides operational visibility into metrics such as:
-
-- CPU utilization
-- Memory utilization
-- Disk utilization
-- Network traffic
-- Apache process count/status
-
-The dashboard is used for monitoring and troubleshooting and does not itself perform remediation.
+Automated remediation itself is performed using **AWS Systems Manager**, not through automated SSH login.
 
 ---
 
-# 9. Alerting Layer
+# 6. Compute Infrastructure
 
-The finalized solution contains **two supported severities**.
+Amazon EC2 hosts the main application workload.
 
-## 9.1 P1 – Apache HTTP Server Failure
+The instance contains:
 
-| Property | Value |
-| --- | --- |
-| Alarm Name | `NOC-cloudops-automate` |
-| Priority | P1 |
-| Condition | Apache/httpd process unavailable |
-| Response | Automatic remediation |
-| Remediation | Restart Apache through SSM |
-| Verification | Initial check + stability recheck |
+```text
+EC2
+│
+├── Apache HTTPD
+│
+├── CloudWatch Agent
+│
+└── SSM Agent
+```
 
-When the alarm enters the `ALARM` state, the event is processed as a P1 incident.
+### Apache HTTPD
 
----
+HTTPD provides the web service used for the P1 incident scenario.
 
-## 9.2 P2 – High CPU Utilization
+### CloudWatch Agent
 
-| Property | Value |
-| --- | --- |
-| Alarm Name | `cpu alert` |
-| Priority | P2 |
-| Metric | `CPUUtilization` |
-| Threshold | Greater than 50% |
-| Response | Diagnostic collection |
-| Automatic CPU remediation | Not implemented |
-| Manual review | Required |
+The CloudWatch Agent collects additional operating-system and application-level monitoring information.
 
-When the alarm enters the `ALARM` state, Lambda collects diagnostic information using SSM.
+For P1, it monitors the HTTPD process using the `procstat` plugin.
 
-The diagnostic information includes:
+### SSM Agent
 
-- Uptime and load
-- Top CPU-consuming processes
-- Memory usage
-
-The P2 workflow does not automatically restart services or perform destructive remediation.
+The SSM Agent allows AWS Systems Manager to securely execute commands on the EC2 instance.
 
 ---
 
-# 10. Notification Layer
+# 7. Monitoring Infrastructure
 
-## Amazon SNS
+Amazon CloudWatch is the central monitoring service.
 
-| Property | Value |
-| --- | --- |
-| Topic Name | `cloudops-sns` |
-| Display Name | `NOC-topic` |
-| Region | `ap-south-1` |
-
-SNS is used to:
-
-- Deliver incident notifications by email.
-- Provide the event integration used by the Lambda workflow.
-- Deliver P1 recovery notifications.
-- Deliver P2 diagnostic and manual-review notifications.
-
-Notifications include incident information such as priority, alarm name, instance information, detection time, and remediation/diagnostic status.
+Two finalized incident types are monitored.
 
 ---
 
-# 11. Automation Layer
+## P1 — HTTPD Failure
 
-## AWS Lambda
+P1 monitors the Apache HTTPD process.
 
-| Property | Value |
-| --- | --- |
-| Function Name | `Cloudops-NOC-automate` |
-| Runtime | Python |
-| Trigger | CloudWatch alarm event through the configured notification path |
+```text
+HTTPD
+   ↓
+CloudWatch Agent
+   ↓
+procstat
+   ↓
+procstat_lookup_pid_count
+   ↓
+CloudWatch
+   ↓
+NOC-cloudops-automate
+```
 
-The Lambda function is the central incident-processing component.
+The `procstat_lookup_pid_count` metric represents the number of matching HTTPD processes.
 
-Its workflow includes:
+When the process count falls below the configured threshold, the CloudWatch alarm can enter the `ALARM` state.
 
-1. Parse the CloudWatch alarm event.
-2. Extract the alarm name and alarm state.
-3. Identify the supported priority.
-4. Create an incident record.
-5. Send the appropriate detection notification.
-6. Execute the P1 or P2 workflow.
-7. Record the SSM command result.
-8. Send the appropriate final notification.
+### P1 Alarm
 
-Unsupported alarm names are ignored and do not generate operational notifications.
+```text
+Alarm Name:
+NOC-cloudops-automate
+```
 
-This behavior prevents unrelated test alarms, such as `Parser-Test`, from entering the production incident workflow.
+Response:
+
+```text
+Automatic Remediation
+```
 
 ---
 
-# 12. Management and Remediation Layer
+# 8. P2 — CPU Utilization
 
-AWS Systems Manager provides secure command execution against the EC2 managed node.
+P2 uses the EC2 native metric:
 
-## P1 Workflow
+```text
+CPUUtilization
+```
 
-For an Apache failure:
+Flow:
+
+```text
+EC2
+   ↓
+CPUUtilization
+   ↓
+CloudWatch
+   ↓
+cpu alert
+```
+
+### P2 Alarm
+
+```text
+Alarm Name:
+cpu alert
+```
+
+Response:
+
+```text
+Diagnostic Only
+```
+
+P2 does not automatically restart the instance or services.
+
+High CPU can have multiple causes, so diagnosis is performed before human review.
+
+---
+
+# 9. P1 Automated Remediation Workflow
+
+```mermaid
+flowchart TD
+
+    HTTPD["HTTPD Failure"]
+
+    AGENT["CloudWatch Agent"]
+
+    METRIC["procstat_lookup_pid_count"]
+
+    ALARM["NOC-cloudops-automate<br/>ALARM"]
+
+    LAMBDA["Lambda"]
+
+    PARSE["Alarm Parsing"]
+
+    GATE{"Actionable Alarm Gate"}
+
+    SSM["SSM Run Command"]
+
+    SSMA["SSM Agent"]
+
+    RESTART["Restart HTTPD"]
+
+    VERIFY["Verify HTTPD"]
+
+    STABILITY["Stability Check"]
+
+    RESULT{"Stable?"}
+
+    SUCCESS["Recovered"]
+
+    RETRY["Configured Retry"]
+
+    ESCALATE["Escalation"]
+
+    SNS["SNS Notification"]
+
+    OPS["CloudOps Engineer"]
+
+    HTTPD --> AGENT
+
+    AGENT --> METRIC
+
+    METRIC --> ALARM
+
+    ALARM -->|Direct Alarm Event| LAMBDA
+
+    LAMBDA --> PARSE
+
+    PARSE --> GATE
+
+    GATE -->|Actionable P1| SSM
+
+    GATE -->|Unsupported| IGNORE["Ignore"]
+
+    SSM --> SSMA
+
+    SSMA --> RESTART
+
+    RESTART --> VERIFY
+
+    VERIFY --> STABILITY
+
+    STABILITY --> RESULT
+
+    RESULT -->|Yes| SUCCESS
+
+    RESULT -->|No| RETRY
+
+    RETRY --> VERIFY
+
+    RETRY -->|Persistent Failure| ESCALATE
+
+    SUCCESS --> SNS
+
+    ESCALATE --> SNS
+
+    SNS --> OPS
+```
+
+---
+
+# 10. P1 Remediation Command
+
+Systems Manager executes the Linux service recovery command on EC2.
+
+Conceptually:
+
+```bash
+systemctl restart httpd
+```
+
+After remediation, Lambda does not automatically assume that recovery was successful.
+
+Verification is performed.
+
+```bash
+systemctl is-active httpd
+```
+
+The workflow then performs a stability check to confirm that HTTPD remains active.
+
+---
+
+# 11. P1 Incident Lifecycle
+
+```text
+HTTPD Failure
+      ↓
+Detection
+      ↓
+CloudWatch Alarm
+      ↓
+Direct Alarm Event
+      ↓
+Lambda
+      ↓
+Alarm Parsing
+      ↓
+Actionable Alarm Gate
+      ↓
+SSM
+      ↓
+Remediation
+      ↓
+Verification
+      ↓
+Stability Check
+      ↓
+┌─────────────┐
+│             │
+PASS         FAIL
+│             │
+Recovery     Retry / Escalation
+│             │
+└──────┬──────┘
+       ↓
+      SNS
+       ↓
+CloudOps Engineer
+```
+
+---
+
+# 12. P2 Diagnostic Workflow
+
+```mermaid
+flowchart TD
+
+    EC2["EC2"]
+
+    CPU["CPUUtilization"]
+
+    ALARM["cpu alert<br/>ALARM"]
+
+    LAMBDA["Lambda"]
+
+    PARSE["Alarm Parsing"]
+
+    DECISION["P2 Diagnostic Decision"]
+
+    SSM["SSM Run Command"]
+
+    AGENT["SSM Agent"]
+
+    DIAG["Collect Diagnostics"]
+
+    CPUINFO["CPU / Load"]
+
+    PROCESS["Top Processes"]
+
+    MEMORY["Memory Information"]
+
+    RESULT["Diagnostic Result"]
+
+    SNS["SNS"]
+
+    OPS["CloudOps Engineer<br/>Manual Review"]
+
+    EC2 --> CPU
+
+    CPU --> ALARM
+
+    ALARM -->|Alarm Event| LAMBDA
+
+    LAMBDA --> PARSE
+
+    PARSE --> DECISION
+
+    DECISION --> SSM
+
+    SSM --> AGENT
+
+    AGENT --> DIAG
+
+    DIAG --> CPUINFO
+
+    DIAG --> PROCESS
+
+    DIAG --> MEMORY
+
+    CPUINFO --> RESULT
+
+    PROCESS --> RESULT
+
+    MEMORY --> RESULT
+
+    RESULT --> SNS
+
+    SNS --> OPS
+```
+
+P2 follows:
+
+```text
+Detect
+   ↓
+Diagnose
+   ↓
+Collect Information
+   ↓
+Notify
+   ↓
+Manual Review
+```
+
+No automatic CPU remediation is performed.
+
+---
+
+# 13. Lambda Automation Layer
+
+AWS Lambda acts as the decision and automation engine.
+
+The main workflow is:
+
+```text
+Receive CloudWatch Alarm Event
+          ↓
+Parse event["alarmData"]
+          ↓
+Extract Alarm Information
+          ↓
+Actionable Alarm Gate
+          ↓
+Identify P1 / P2
+          ↓
+Execute Approved Workflow
+```
+
+For P1:
 
 ```text
 Lambda
-  ↓
-SSM Run Command
-  ↓
-Restart httpd
-  ↓
-Initial httpd check
-  ↓
-15-second stability recheck
-  ↓
-Resolved notification
+   ↓
+SSM
+   ↓
+Restart HTTPD
+   ↓
+Verify
 ```
 
-The verified P1 test demonstrated:
-
-- SSM command execution succeeded.
-- Apache initial check passed.
-- Stability recheck passed.
-- A P1 resolved notification was generated.
-
----
-
-## P2 Workflow
-
-For CPU utilization above 50%:
+For P2:
 
 ```text
 Lambda
-  ↓
-SSM Run Command
-  ↓
-Collect CPU diagnostics
-  ↓
-Diagnostic report
-  ↓
-Manual review required
+   ↓
+SSM
+   ↓
+Collect Diagnostics
+   ↓
+Report
 ```
 
-The verified P2 test demonstrated:
-
-- SSM diagnostic command succeeded.
-- CPU diagnostic information was collected.
-- A P2 diagnostic report was generated.
-- No automatic CPU remediation was performed.
-
 ---
 
-# 13. IAM and Security Layer
+# 14. Actionable Alarm Gate
 
-IAM provides authentication and authorization for AWS service interactions.
+The Actionable Alarm Gate protects the automation workflow.
 
-The EC2 instance uses:
-
-`cloudops-EC2-inline-role`
-
-The environment is designed around role-based AWS access rather than storing long-term AWS access keys on the EC2 instance.
-
-Systems Manager is used for remote command execution, reducing the operational need to use SSH for automated remediation.
-
-Security controls include:
-
-- IAM role-based access
-- Least-privilege permissions
-- Security Group network controls
-- CloudWatch Logs for audit and troubleshooting
-- Systems Manager for managed remote execution
-- No hardcoded AWS credentials in the automation workflow
-
----
-
-# 14. Data and Incident Flow
-
-## P1 – Apache Failure
+Instead of executing automation for every alarm:
 
 ```text
-Apache/httpd failure
+Alarm
+   ↓
+Is this a recognized actionable alarm?
         ↓
-CloudWatch detects condition
-        ↓
-NOC-cloudops-automate → ALARM
-        ↓
-CloudWatch alarm event
-        ↓
-Lambda
-        ↓
-P1 incident created
-        ↓
-Detection notification
-        ↓
-SSM Run Command
-        ↓
-Restart httpd
-        ↓
-Initial verification
-        ↓
-15-second stability verification
-        ↓
-P1 Resolved notification
+   ┌────┴────┐
+   │         │
+  YES        NO
+   │         │
+   ↓         ↓
+Process    Ignore
 ```
+
+This reduces the risk of uncontrolled remediation.
 
 ---
 
-## P2 – CPU > 50%
+# 15. Systems Manager Layer
+
+AWS Systems Manager provides controlled command execution on EC2.
+
+The automation path is:
 
 ```text
-CPUUtilization > 50%
-        ↓
-cpu alert → ALARM
-        ↓
-CloudWatch alarm event
-        ↓
 Lambda
+   ↓
+AWS SDK / Boto3
+   ↓
+SSM API
+   ↓
+Systems Manager
+   ↓
+SSM Agent
+   ↓
+EC2
+   ↓
+Linux Command
+```
+
+Lambda does not directly log in to the EC2 instance.
+
+Systems Manager acts as the management layer between Lambda and EC2.
+
+---
+
+# 16. Notification and Escalation Layer
+
+Amazon SNS is used after incident processing to deliver operational notifications.
+
+```text
+Lambda
+   ↓
+SNS
+   ↓
+CloudOps / NOC Engineer
+```
+
+SNS may communicate:
+
+* Incident detected
+* Remediation status
+* Recovery status
+* Diagnostic results
+* Automation failure
+* Escalation requirement
+
+SNS is used for **notification and escalation**, not as the primary Lambda trigger in the finalized architecture.
+
+---
+
+# 17. IAM Security
+
+AWS IAM controls service-to-service access.
+
+The main concepts are:
+
+### Trust Policy
+
+Defines:
+
+> Who can assume the IAM role?
+
+Example:
+
+```text
+Lambda Service
+      ↓
+Trust Policy
+      ↓
+Lambda Execution Role
+```
+
+### Permission Policy
+
+Defines:
+
+> What actions can the role perform?
+
+Example:
+
+```text
+Lambda Role
+    ↓
+Permission Policy
+    ↓
+ssm:SendCommand
+```
+
+### Resource-Based Policy
+
+A resource-based policy is attached directly to an AWS resource and defines which principals may access or invoke it.
+
+### Explicit Deny
+
+An explicit deny overrides an allow.
+
+```text
+Allow + Explicit Deny
         ↓
-P2 incident created
-        ↓
-Detection notification
-        ↓
-SSM diagnostic command
-        ↓
-CPU / load / process / memory collection
-        ↓
-Diagnostic report
-        ↓
-Manual review required
+       DENY
+```
+
+The project follows the principle of **least privilege** wherever possible.
+
+---
+
+# 18. Incident Management Model
+
+The operational model can be represented as:
+
+```mermaid
+flowchart LR
+
+    DETECT["Detect"]
+
+    DIAGNOSE["Diagnose"]
+
+    DECIDE["Decide"]
+
+    REMEDIATE["Remediate"]
+
+    VERIFY["Verify"]
+
+    RECOVER["Recover"]
+
+    ESCALATE["Escalate"]
+
+    HUMAN["Human Investigation"]
+
+    DETECT --> DIAGNOSE
+
+    DIAGNOSE --> DECIDE
+
+    DECIDE -->|Known / Safe| REMEDIATE
+
+    REMEDIATE --> VERIFY
+
+    VERIFY -->|Success| RECOVER
+
+    VERIFY -->|Failure| ESCALATE
+
+    DECIDE -->|Unknown / Unsafe| ESCALATE
+
+    ESCALATE --> HUMAN
 ```
 
 ---
 
-# 15. Logging and Operational Visibility
+# 19. Automation vs Human Operations
 
-The infrastructure uses CloudWatch Logs and service-level execution records to support troubleshooting.
+The project does not attempt to automate every incident.
 
-Important information recorded by the Lambda workflow includes:
+### P1
 
-- Alarm name
-- Alarm state
-- Incident ID
-- Priority
-- Instance name and ID
-- SSM Command ID
-- SSM execution status
-- Diagnostic or remediation result
-- Notification status
-- Resolution or review status
+```text
+Known Failure
++
+Known Safe Recovery
+=
+Automated Remediation
+```
 
-The verified P1 and P2 tests produced traceable incident records and SSM command identifiers.
+### P2
 
----
+```text
+Abnormal Condition
++
+Multiple Possible Causes
+=
+Diagnosis + Human Review
+```
 
-# 16. Infrastructure Benefits
+This separates:
 
-The infrastructure provides:
+> Monitoring from remediation.
 
-- Automated Apache failure recovery for P1 incidents
-- Automated CPU diagnostics for P2 incidents
-- Reduced manual intervention for known P1 failures
-- Faster incident detection
-- Centralized monitoring
-- Structured incident notifications
-- Secure remote command execution
-- Operational logging and traceability
-- Clear separation between automatic remediation and manual review
+An alarm does not automatically mean that destructive action should be performed.
 
 ---
 
-# 17. Design Highlights
+# 20. Reliability and MTTR
 
-- Single-region AWS architecture
-- Single EC2 workload
-- Event-driven incident processing
-- CloudWatch-based monitoring
-- SNS-based notification and integration
-- Lambda-based incident automation
-- Systems Manager-based remote execution
-- IAM role-based authentication
-- Two finalized severity levels: P1 and P2
-- P1 automatic remediation
-- P2 diagnostic-only handling
-- Unsupported alarms ignored by the automation workflow
+The project improves operational reliability through:
+
+* Automated incident detection
+* Event-driven response
+* Controlled remediation
+* Verification
+* Stability checking
+* Retry limitation
+* Escalation
+* Human review where appropriate
+
+One of the main goals is to reduce:
+
+**MTTR — Mean Time To Recovery**
+
+Instead of:
+
+```text
+Alarm
+ ↓
+Engineer notices
+ ↓
+Engineer connects
+ ↓
+Engineer investigates
+ ↓
+Engineer restarts
+ ↓
+Engineer verifies
+```
+
+P1 can follow:
+
+```text
+Alarm
+ ↓
+Lambda
+ ↓
+SSM
+ ↓
+Restart
+ ↓
+Verify
+```
 
 ---
 
-# 18. Limitations
+# 21. Traffic Flow
 
-The current infrastructure is intentionally limited to the finalized project scope.
+The web request path can be understood as:
 
-- Single AWS Region
-- Single EC2 instance
-- No Auto Scaling Group
-- No Application Load Balancer
-- No multi-AZ high-availability deployment
-- Apache is the only automatically remediated service
-- CPU incidents are diagnostic-only
-- Email is the operational notification channel
-- Infrastructure is manually deployed
+```text
+User
+ ↓
+Browser
+ ↓
+Internet
+ ↓
+Internet Gateway
+ ↓
+VPC Routing
+ ↓
+Security Group
+ ↓
+EC2 ENI
+ ↓
+ens5
+ ↓
+NIC Driver
+ ↓
+Linux Kernel
+ ↓
+IP
+ ↓
+TCP :80
+ ↓
+Socket
+ ↓
+HTTPD
+```
+
+Response:
+
+```text
+HTTPD
+ ↓
+Socket
+ ↓
+TCP
+ ↓
+IP
+ ↓
+Linux Kernel
+ ↓
+NIC Driver
+ ↓
+ens5
+ ↓
+EC2 ENI
+ ↓
+VPC Routing
+ ↓
+Internet Gateway
+ ↓
+Internet
+ ↓
+Browser
+```
 
 ---
 
-# 19. Conclusion
+# 22. Infrastructure Benefits
 
-The CloudOps NOC Automation infrastructure integrates Amazon EC2, Amazon CloudWatch, Amazon SNS, AWS Lambda, AWS Systems Manager, and IAM into an event-driven operational workflow.
+The current architecture provides:
 
-The finalized architecture supports two NOC use cases. P1 Apache failures are automatically remediated through Systems Manager and verified for stability. P2 CPU utilization alarms above 50% trigger automated diagnostics and escalation for manual review, without applying automatic CPU remediation.
+* Centralized AWS monitoring
+* P1 automatic HTTPD recovery
+* P2 automated diagnostic collection
+* Reduced manual intervention for predefined incidents
+* Event-driven automation
+* Controlled SSM command execution
+* Recovery verification
+* Stability verification
+* Human escalation
+* IAM-controlled permissions
+* AWS-native service integration
+* Lower operational complexity for the project scope
 
-This infrastructure provides a practical foundation for cloud operations monitoring, incident handling, automation, troubleshooting, and operational reporting.
+---
+
+# 23. Current Limitations
+
+CloudOps NOC V2.0 is intentionally limited in scope.
+
+Current limitations include:
+
+* Single EC2 workload
+* Single-AZ architecture
+* No Multi-AZ high availability
+* No Auto Scaling Group
+* No load balancer
+* No automated infrastructure replacement
+* No complete disaster recovery implementation
+* No centralized backup and restore architecture
+* P1 remediation supports predefined HTTPD incidents only
+* P2 CPU incidents remain diagnostic-only
+* Automation depends on CloudWatch metric and alarm evaluation
+* Retry behavior is intentionally limited rather than unlimited
+
+---
+
+# 24. Future Improvements
+
+Possible production improvements include:
+
+```text
+Current V2.0
+     ↓
+Multi-AZ Architecture
+     ↓
+Load Balancer
+     ↓
+Auto Scaling
+     ↓
+Automated Instance Replacement
+     ↓
+Centralized Backup
+     ↓
+Defined RTO / RPO
+     ↓
+Additional Incident Types
+     ↓
+Expanded Diagnostics
+     ↓
+Infrastructure as Code
+```
+
+These are future possibilities and are not part of the current implemented V2.0 service scope.
+
+---
+
+# 25. Architecture Summary
+
+```text
+                    CloudOps NOC V2.0
+
+                         EC2
+                    HTTPD Service
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+      CloudWatch Agent        CPUUtilization
+              │                     │
+     procstat_lookup           CloudWatch
+       _pid_count                  │
+              │                 cpu alert
+          CloudWatch                 │
+              │                     │
+ NOC-cloudops-automate              │
+              │                     │
+              └──────────┬──────────┘
+                         │
+                 CloudWatch Alarm
+                         │
+                  Direct Event
+                         │
+                         ▼
+                       Lambda
+                         │
+                 Alarm Parsing
+                         │
+               Actionable Alarm Gate
+                         │
+                 ┌───────┴───────┐
+                 │               │
+                P1              P2
+                 │               │
+            Remediation       Diagnosis
+                 │               │
+                 └───────┬───────┘
+                         │
+                        SSM
+                         │
+                     SSM Agent
+                         │
+                        EC2
+                         │
+                 Result / Status
+                         │
+                       Lambda
+                         │
+                        SNS
+                         │
+                 CloudOps Engineer
+```
+
+---
+
+# Conclusion
+
+CloudOps NOC Automation V2.0 demonstrates a controlled AWS-native operational architecture for monitoring and incident response.
+
+The architecture separates **detection, diagnosis, decision, remediation, verification, recovery, and escalation**.
+
+P1 HTTPD failures use controlled automated remediation through:
+
+```text
+CloudWatch
+→ Lambda
+→ Systems Manager
+→ EC2
+→ Verification
+→ SNS
+```
+
+P2 CPU incidents use:
+
+```text
+CloudWatch
+→ Lambda
+→ Systems Manager
+→ Diagnostics
+→ SNS
+→ Human Review
+```
+
+The project demonstrates that cloud automation should not simply execute actions for every alarm.
+
+Instead, safe automation should follow:
+
+> **Detect → Decide → Act → Verify → Recover or Escalate**
