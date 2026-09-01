@@ -1,408 +1,97 @@
-# AWS Identity and Access Management (IAM)
+# AWS Identity and Access Management (IAM) — Authorization and Least Privilege
 
-## CloudOps NOC Automation Project
+## Overview
 
----
+AWS Identity and Access Management (IAM) is the **authorization and access-control layer** of the CloudOps NOC Automation V2.0 project.
 
-# 1. Overview
+IAM controls which AWS identities and services are allowed to perform specific AWS API operations on project resources.
 
-AWS Identity and Access Management (IAM) is the authorization and authentication control layer of the CloudOps NOC Automation project.
+The project uses IAM roles and policies so that EC2 and Lambda can interact with AWS services without storing permanent AWS access keys in application code.
 
-IAM controls which AWS identities and services can access project resources and which API operations they are allowed to perform.
+In simple terms:
 
-The project uses IAM Roles instead of storing permanent AWS access keys on the EC2 instance or inside the Lambda function.
-
-IAM is one of the seven AWS services implemented in this project:
-
-1. IAM
-2. Amazon EC2
-3. Amazon VPC
-4. Amazon CloudWatch
-5. Amazon SNS
-6. AWS Systems Manager (SSM)
-7. AWS Lambda
+> **IAM answers: Who or which service is allowed to do what on which AWS resource?**
 
 ---
 
-# 2. Purpose
+## 1. Role in the Project
 
 IAM is used to:
 
-- Authenticate AWS services.
-- Authorize AWS API operations.
-- Allow EC2 to communicate with Systems Manager.
-- Allow EC2 to publish monitoring data to CloudWatch.
-- Allow Lambda to execute SSM Run Commands.
-- Allow Lambda to write execution logs to CloudWatch Logs.
-- Allow Lambda to publish notifications to SNS.
-- Control access using least-privilege permissions.
-- Eliminate hardcoded AWS credentials.
+- Provide AWS permissions to the EC2 instance.
+- Provide AWS permissions to the Lambda function.
+- Allow the CloudWatch Agent to publish monitoring data.
+- Allow the SSM Agent to operate as a managed-node agent.
+- Allow Lambda to call Systems Manager.
+- Allow Lambda to read SSM command results.
+- Allow Lambda to publish operational notifications to SNS.
+- Allow Lambda to read required EC2 instance details.
+- Allow Lambda to write execution logs.
+- Allow Lambda to use the SSM Parameter Store incident counter.
+- Avoid hardcoded permanent AWS credentials.
+- Apply the **Principle of Least Privilege**.
+
+IAM does not monitor the server, restart HTTPD, or send notifications itself.
 
 ---
 
-# 3. IAM Architecture
+## 2. IAM Architecture
 
-The project uses different IAM roles for different workloads.
+The project uses separate IAM permission paths for EC2 and Lambda.
 
 ```text
-                    AWS IAM
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-          ▼                         ▼
-   EC2 Instance Role          Lambda Execution Role
-          │                         │
-          │                         ├── CloudWatch Logs
-          │                         ├── SSM Run Command
-          │                         └── SNS Publish
-          │
-          ├── Systems Manager
-          ├── CloudWatch
-          └── CloudWatch Logs
+                         AWS IAM
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+              ▼                           ▼
+        EC2 Instance Role          Lambda Execution Role
+              │                           │
+       ┌──────┴──────┐             ┌──────┼───────────┐
+       ▼             ▼             ▼      ▼           ▼
+CloudWatch Agent   SSM Agent      SSM     SNS         EC2
+       │             │             │      │           │
+       ▼             ▼             ▼      ▼           ▼
+   Metrics/Logs   Managed Node   Commands Notify   Read Details
 ```
 
-The IAM role attached to EC2 and the IAM execution role used by Lambda have different responsibilities.
+The two roles have different responsibilities.
 
 ---
 
-# 4. IAM Components
+## 3. IAM Components Used
 
-The IAM implementation consists of:
-
-- IAM Roles
-- Trust Policies
-- Permission Policies
-- Inline Policies
-- Managed Policies
-- IAM Role Attachments
-- Least-Privilege Permissions
+| IAM Concept | Project Purpose |
+|---|---|
+| IAM Role | Provides temporary AWS credentials to a service/workload |
+| Trust Policy | Defines which service/principal may assume a role |
+| Permission Policy | Defines what actions the assumed role may perform |
+| Inline Policy | Policy embedded directly in a role or identity |
+| Managed Policy | Reusable policy managed by AWS or the customer |
+| Instance Profile | Makes an IAM role available to EC2 |
+| Resource-Based Policy | Policy attached directly to supported AWS resources |
+| Least Privilege | Grants only the permissions required for a responsibility |
 
 ---
 
-# 5. EC2 IAM Role
+## 4. EC2 IAM Role
 
-## Role Name
+### Current Project Role
 
 ```text
 cloudops-EC2-inline-role
 ```
 
-## Purpose
+The EC2 role provides temporary AWS credentials to software running on the instance.
 
-The EC2 role provides the EC2 instance with temporary AWS credentials that allow the installed CloudWatch Agent and SSM Agent to communicate with AWS services.
-
-The role is attached to the EC2 instance through an Instance Profile.
-
----
-
-# 6. EC2 Role Responsibilities
-
-The EC2 role is used for:
-
-### Systems Manager
-
-Allows the SSM Agent to register the instance as a managed node and communicate with Systems Manager.
-
-### CloudWatch
-
-Allows the CloudWatch Agent to publish system metrics.
-
-### CloudWatch Logs
-
-Allows supported agent functionality to send logs to CloudWatch Logs.
-
-### EC2
-
-Required EC2 API permissions may be provided where the project configuration requires instance information.
-
----
-
-# 7. EC2 Role Policy
-
-For Systems Manager, the standard AWS managed policy is:
+Important consumers include:
 
 ```text
-AmazonSSMManagedInstanceCore
-```
-
-This policy provides the core permissions required by the SSM Agent.
-
-For CloudWatch Agent functionality, permissions should be limited to the actions required by the configured metrics and log collection.
-
-Example permissions include:
-
-```text
-cloudwatch:PutMetricData
-logs:CreateLogGroup
-logs:CreateLogStream
-logs:DescribeLogStreams
-logs:PutLogEvents
-```
-
-The exact policy should match the CloudWatch Agent configuration deployed on the instance.
-
----
-
-# 8. EC2 Trust Policy
-
-The EC2 IAM role must trust the EC2 service.
-
-Example trust relationship:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ec2.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-```
-
-This allows Amazon EC2 to assume the role and provide temporary credentials to applications running on the instance.
-
----
-
-# 9. Lambda Execution Role
-
-Lambda uses a separate IAM execution role.
-
-Example role name:
-
-```text
-Cloudops-NOC-Lambda-Execution-Role
-```
-
-The role allows the Lambda function to perform only the AWS API operations required by the automation workflow.
-
----
-
-# 10. Lambda Role Responsibilities
-
-The Lambda execution role provides permissions for:
-
-### CloudWatch Logs
-
-Lambda requires permissions to create and write its execution logs.
-
-Typical actions:
-
-```text
-logs:CreateLogGroup
-logs:CreateLogStream
-logs:PutLogEvents
-```
-
-### Systems Manager
-
-Lambda requires permission to execute the remediation command.
-
-Primary API operation:
-
-```text
-ssm:SendCommand
-```
-
-### EC2
-
-If the Lambda implementation performs EC2 API lookups, the role may require read-only permissions such as:
-
-```text
-ec2:DescribeInstances
-```
-
-### SNS
-
-If Lambda publishes the remediation result to the SNS topic:
-
-```text
-sns:Publish
-```
-
----
-
-# 11. Lambda Least-Privilege Policy
-
-A project-specific Lambda policy can be structured like this:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "SSMRunCommand",
-      "Effect": "Allow",
-      "Action": [
-        "ssm:SendCommand",
-        "ssm:GetCommandInvocation"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "PublishNotification",
-      "Effect": "Allow",
-      "Action": [
-        "sns:Publish"
-      ],
-      "Resource": "arn:aws:sns:ap-south-1:ACCOUNT_ID:cloudops-sns"
-    },
-    {
-      "Sid": "CloudWatchLogs",
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-`ACCOUNT_ID` should be replaced with the AWS account ID during actual deployment.
-
-Where supported by the specific API and resource model, permissions should be narrowed further to specific resources instead of using `"Resource": "*"`.
-
----
-
-# 12. Lambda Trust Policy
-
-The Lambda execution role must trust the Lambda service.
-
-Example:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "lambda.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-```
-
-This allows AWS Lambda to assume the execution role when the function runs.
-
----
-
-# 13. IAM and CloudWatch
-
-CloudWatch interacts with the project through multiple permission paths.
-
-```text
-EC2
- │
- │ IAM Role
- ▼
 CloudWatch Agent
- │
- ▼
-CloudWatch Metrics
- │
- ▼
-CloudWatch Alarm
-```
-
-The CloudWatch Agent uses the EC2 instance role to authenticate when publishing metrics.
-
-The CloudWatch Alarm itself evaluates metrics and invokes its configured action.
-
----
-
-# 14. IAM and SNS
-
-The monitoring workflow uses SNS for notification distribution.
-
-```text
-CloudWatch Alarm
-       │
-       ▼
-   SNS Topic
-       │
-       ├── Email
-       │
-       └── Lambda
-```
-
-SNS access is controlled through AWS IAM and, where applicable, SNS topic resource policies.
-
-Lambda requires `sns:Publish` only if the Lambda function publishes the remediation result back to the SNS topic.
-
----
-
-# 15. IAM and Systems Manager
-
-Systems Manager uses IAM on both sides of the automation workflow.
-
-```text
-Lambda
-   │
-   │ Lambda IAM Role
-   │
-   ▼
-SSM SendCommand
-   │
-   ▼
-Systems Manager
-   │
-   ▼
 SSM Agent
-   │
-   │ EC2 IAM Role
-   ▼
-EC2 Instance
 ```
 
-The Lambda role authorizes the API call to Systems Manager.
-
-The EC2 role allows the SSM Agent to communicate with Systems Manager.
-
-Both roles therefore have different responsibilities.
-
----
-
-# 16. IAM and Lambda Workflow
-
-The complete authorization flow is:
-
-```text
-CloudWatch Alarm
-       │
-       ▼
-SNS
-       │
-       ▼
-Lambda
-       │
-       │ Assumes Lambda Execution Role
-       ▼
-AWS API
-       │
-       ├── Systems Manager
-       │
-       ├── SNS
-       │
-       └── CloudWatch Logs
-```
-
-Lambda does not require AWS access keys embedded in the Python code.
-
----
-
-# 17. IAM and EC2 Workflow
-
-The EC2 instance receives temporary credentials through its attached IAM Instance Profile.
+Conceptually:
 
 ```text
 EC2
@@ -411,20 +100,593 @@ EC2
 Instance Profile
  │
  ▼
-IAM Role
+EC2 IAM Role
  │
- ├── SSM
- ├── CloudWatch
- └── CloudWatch Logs
+ ├── CloudWatch permissions
+ └── Systems Manager permissions
 ```
-
-Applications such as the CloudWatch Agent and SSM Agent can use the role credentials through the AWS SDK/credential provider chain.
 
 ---
 
-# 18. No Hardcoded Credentials
+## 5. EC2 Role — CloudWatch Permissions
 
-The project does not store:
+The repository policy `cloudops-EC2-inline-role.json` allows the EC2-side monitoring components to publish CloudWatch Agent metrics.
+
+The policy includes:
+
+```text
+cloudwatch:PutMetricData
+```
+
+and restricts the metric-publishing statement to the:
+
+```text
+CWAgent
+```
+
+namespace.
+
+The policy also contains CloudWatch read permissions such as:
+
+```text
+cloudwatch:GetMetricData
+cloudwatch:GetMetricStatistics
+cloudwatch:ListMetrics
+cloudwatch:DescribeAlarms
+```
+
+This supports monitoring and project verification.
+
+---
+
+## 6. EC2 Role — CloudWatch Logs Permissions
+
+The current EC2 policy contains log permissions including:
+
+```text
+logs:CreateLogGroup
+logs:CreateLogStream
+logs:DescribeLogGroups
+logs:DescribeLogStreams
+logs:PutLogEvents
+```
+
+It also contains read operations used for troubleshooting.
+
+These permissions support configured CloudWatch Agent log collection.
+
+---
+
+## 7. EC2 Role — Systems Manager Permissions
+
+The EC2 role contains the permissions required by the SSM Agent to operate as a Systems Manager managed node.
+
+The current repository policy includes SSM-related operations and the communication channels required by the agent.
+
+Conceptually:
+
+```text
+EC2
+ │
+ ▼
+SSM Agent
+ │
+ ▼
+EC2 IAM Role
+ │
+ ▼
+Authorized SSM Communication
+ │
+ ▼
+AWS Systems Manager
+```
+
+The role also includes the message-channel permissions required for Systems Manager communication.
+
+---
+
+## 8. EC2 Role — Additional Read Permissions
+
+The current EC2 role policy includes read operations such as:
+
+```text
+ec2:DescribeInstances
+ec2:DescribeTags
+ec2:DescribeVolumes
+```
+
+and selected Parameter Store read operations.
+
+These are supporting permissions and should remain limited to what the deployed agents and project workflow require.
+
+---
+
+## 9. EC2 Trust Policy
+
+The EC2 role must trust the EC2 service.
+
+Conceptually:
+
+```json
+{
+  "Principal": {
+    "Service": "ec2.amazonaws.com"
+  },
+  "Action": "sts:AssumeRole"
+}
+```
+
+Meaning:
+
+> **Amazon EC2 is allowed to assume this role.**
+
+The trust policy answers:
+
+> **Who may assume the role?**
+
+The permission policy answers:
+
+> **What may the assumed role do?**
+
+---
+
+## 10. Lambda Execution Role
+
+Lambda uses a separate execution role.
+
+The current project-specific Lambda policy is stored in:
+
+```text
+cloudops-lambda-inline-policy.json
+```
+
+The policy is designed around the operations required by the current automation workflow.
+
+Conceptually:
+
+```text
+Lambda
+   │
+   ▼
+Lambda Execution Role
+   │
+   ├── SSM
+   ├── SNS
+   ├── EC2 Read
+   ├── Parameter Store
+   └── CloudWatch Logs
+```
+
+---
+
+## 11. Lambda Permission — Incident Counter
+
+The current Lambda policy allows:
+
+```text
+ssm:GetParameter
+ssm:PutParameter
+```
+
+for the project incident-counter parameter path.
+
+The Lambda function uses this to generate sequential incident IDs.
+
+Conceptually:
+
+```text
+Lambda
+   │
+   ▼
+Parameter Store
+   │
+   ▼
+Read Counter
+   │
+   ▼
+Increment
+   │
+   ▼
+Write Counter
+```
+
+This permission is separate from SSM Run Command.
+
+---
+
+## 12. Lambda Permission — Read EC2 Details
+
+The current Lambda policy allows:
+
+```text
+ec2:DescribeInstances
+```
+
+Lambda uses this read-only permission to obtain required instance information for incident context and notifications.
+
+This does **not** give Lambda permission to terminate, reboot, or modify the EC2 instance.
+
+---
+
+## 13. Lambda Permission — SSM SendCommand
+
+The current Lambda policy allows:
+
+```text
+ssm:SendCommand
+```
+
+The policy scopes the SendCommand permission to:
+
+- The project EC2 target.
+- The AWS-managed `AWS-RunShellScript` SSM document.
+
+Conceptually:
+
+```text
+Lambda
+   │
+   ▼
+IAM Authorization
+   │
+   ▼
+ssm:SendCommand
+   │
+   ▼
+Systems Manager
+```
+
+This is a strong example of **least-privilege resource scoping**.
+
+---
+
+## 14. Lambda Permission — Read SSM Command Result
+
+The current Lambda policy also allows:
+
+```text
+ssm:GetCommandInvocation
+```
+
+This is required because sending a command is not enough.
+
+Lambda must retrieve the command status and output to determine whether:
+
+```text
+Success
+Failed
+TimedOut
+Cancelled
+```
+
+occurred.
+
+---
+
+## 15. Lambda Permission — SNS Publish
+
+The current Lambda policy allows:
+
+```text
+sns:Publish
+```
+
+to the project SNS topic:
+
+```text
+cloudops-sns
+```
+
+Correct flow:
+
+```text
+Lambda
+   │
+   ▼
+IAM authorizes sns:Publish
+   │
+   ▼
+SNS
+   │
+   ▼
+Operations Engineer
+```
+
+Important:
+
+> **SNS is downstream of Lambda in the current V2.0 architecture.**
+
+It is not the service that triggers Lambda.
+
+---
+
+## 16. Lambda Permission — CloudWatch Logs
+
+The Lambda policy permits the function to create and write its execution logs.
+
+Typical operations include:
+
+```text
+logs:CreateLogGroup
+logs:CreateLogStream
+logs:PutLogEvents
+```
+
+These permissions allow Lambda execution details and errors to be written to CloudWatch Logs.
+
+---
+
+## 17. Lambda Trust Policy
+
+The Lambda execution role must trust the Lambda service.
+
+Conceptually:
+
+```json
+{
+  "Principal": {
+    "Service": "lambda.amazonaws.com"
+  },
+  "Action": "sts:AssumeRole"
+}
+```
+
+Meaning:
+
+> **AWS Lambda is allowed to assume the execution role.**
+
+---
+
+## 18. Trust Policy vs Permission Policy
+
+This distinction is important.
+
+### Trust Policy
+
+Answers:
+
+> **Who can assume this role?**
+
+Example:
+
+```text
+EC2 Role
+→ trusts ec2.amazonaws.com
+
+Lambda Role
+→ trusts lambda.amazonaws.com
+```
+
+### Permission Policy
+
+Answers:
+
+> **What can the role do after it is assumed?**
+
+Example:
+
+```text
+Lambda Role
+→ ssm:SendCommand
+→ ssm:GetCommandInvocation
+→ sns:Publish
+→ ec2:DescribeInstances
+```
+
+Easy memory:
+
+```text
+Trust Policy
+= WHO can become the role?
+
+Permission Policy
+= WHAT can the role do?
+```
+
+---
+
+## 19. Identity-Based vs Resource-Based Policy
+
+### Identity-Based Policy
+
+Attached to:
+
+```text
+User
+Group
+Role
+```
+
+Examples in this project:
+
+```text
+EC2 IAM Role policy
+Lambda execution-role policy
+IAM group permission policy
+```
+
+### Resource-Based Policy
+
+Attached directly to a supported AWS resource.
+
+Examples can include:
+
+```text
+SNS Topic Policy
+Lambda Resource-Based Policy
+```
+
+For the current architecture, Lambda's execution-role permissions authorize Lambda to call SSM and SNS.
+
+A Lambda resource-based policy can separately control which AWS service is allowed to invoke the Lambda function.
+
+---
+
+## 20. Direct CloudWatch → Lambda Authorization
+
+The current V2.0 event path is:
+
+```text
+CloudWatch Alarm
+      │
+      ▼
+Lambda
+```
+
+The old documentation path:
+
+```text
+CloudWatch
+   │
+   ▼
+SNS
+   │
+   ▼
+Lambda
+```
+
+is not the current design.
+
+IAM documentation must therefore not describe SNS as the Lambda trigger.
+
+The authorization model should be understood as:
+
+```text
+CloudWatch Alarm
+      │
+      ▼
+Lambda Invocation
+      │
+      ▼
+Lambda Execution Role
+      │
+      ├── SSM API
+      ├── SNS API
+      ├── EC2 Read
+      └── CloudWatch Logs
+```
+
+The Lambda execution role controls what Lambda can do **after Lambda starts running**.
+
+---
+
+## 21. IAM and P1
+
+P1 authorization flow:
+
+```text
+CloudWatch
+   │
+   ▼
+Lambda
+   │
+   ▼
+Lambda Execution Role
+   │
+   ▼
+ssm:SendCommand
+   │
+   ▼
+Systems Manager
+   │
+   ▼
+SSM Agent
+   │
+   ▼
+EC2
+   │
+   ▼
+systemctl restart httpd
+```
+
+Lambda can request the approved command only if IAM authorizes the API call.
+
+---
+
+## 22. IAM and P2
+
+P2 uses the same controlled SSM execution mechanism, but the command purpose is different.
+
+```text
+cpu alert
+   │
+   ▼
+Lambda
+   │
+   ▼
+IAM Authorization
+   │
+   ▼
+SSM
+   │
+   ▼
+Diagnostic Commands
+```
+
+P2 performs diagnosis only.
+
+IAM does not decide P1 vs P2.
+
+Lambda makes that decision.
+
+---
+
+## 23. Principle of Least Privilege
+
+The project follows:
+
+> **Give each identity only the permissions required for its responsibility.**
+
+Examples:
+
+### Lambda needs
+
+```text
+Send approved SSM commands
+Read command results
+Read required instance details
+Read/write incident counter
+Publish to project SNS topic
+Write Lambda logs
+```
+
+Lambda does **not** require unrestricted EC2 administrator permissions for the current workflow.
+
+### EC2 needs
+
+```text
+CloudWatch Agent permissions
+SSM Agent permissions
+Required supporting read operations
+```
+
+This limits the blast radius if a role is misused.
+
+---
+
+## 24. Explicit Deny
+
+AWS permission evaluation gives an explicit `Deny` higher priority than an `Allow`.
+
+Conceptually:
+
+```text
+Allow
++
+Explicit Deny
+=
+Denied
+```
+
+This is useful to understand during IAM troubleshooting.
+
+A valid `Allow` statement is not enough if another applicable policy explicitly denies the same action.
+
+---
+
+## 25. No Hardcoded Credentials
+
+The project should not store permanent credentials such as:
 
 ```text
 AWS_ACCESS_KEY_ID
@@ -433,322 +695,302 @@ AWS_SECRET_ACCESS_KEY
 
 inside:
 
-- Python scripts
-- Shell scripts
-- Lambda source code
-- EC2 configuration files
-- CloudWatch Agent configuration
+```text
+Lambda source code
+EC2 scripts
+CloudWatch Agent configuration
+Shell scripts
+GitHub repository files
+```
 
-Instead, AWS services obtain temporary credentials through IAM roles.
-
-This reduces the risk of credential leakage.
-
----
-
-# 19. Principle of Least Privilege
-
-The project follows the Principle of Least Privilege.
-
-Each workload receives only the permissions required for its function.
-
-| Workload | Required Access |
-|---|---|
-| EC2 / SSM Agent | Systems Manager communication |
-| EC2 / CloudWatch Agent | Publish monitoring data |
-| Lambda | Execute required SSM command |
-| Lambda | Write CloudWatch Logs |
-| Lambda | Publish required SNS notification |
-| CloudWatch Alarm | Trigger configured SNS action |
-
-Avoid granting broad administrator permissions to EC2 or Lambda.
-
----
-
-# 20. Resource-Based Policies
-
-Some AWS services can also use resource-based policies.
-
-For this project, the important distinction is:
-
-### Identity-Based Policy
-
-Attached to an IAM user, group, or role.
-
-Examples:
+Instead:
 
 ```text
-EC2 IAM Role
+AWS Service
+   │
+   ▼
+IAM Role
+   │
+   ▼
+Temporary Credentials
+```
+
+This reduces credential exposure risk.
+
+---
+
+## 26. IAM Group Policy in the Repository
+
+The IAM folder also contains:
+
+```text
+IAM Group Permision.json
+```
+
+This policy is different from the **runtime service roles**.
+
+It represents permissions for an IAM operator/group to create, inspect, or manage project infrastructure and related resources.
+
+Examples in the file include permissions covering:
+
+- Project IAM roles and instance profiles.
+- `iam:PassRole`.
+- EC2 lifecycle operations.
+- VPC networking operations.
+- CloudWatch alarms and dashboards.
+- CloudWatch Logs troubleshooting.
+- SNS operations.
+
+This policy should not be confused with:
+
+```text
+cloudops-EC2-inline-role.json
+```
+
+or:
+
+```text
+cloudops-lambda-inline-policy.json
+```
+
+Those are workload/runtime permission policies.
+
+---
+
+## 27. IAM Group Policy vs Service Role
+
+Easy distinction:
+
+```text
+IAM Group Policy
+= What the human/operator identity can manage
+
+EC2 Role
+= What software running on EC2 can access
+
+Lambda Role
+= What Lambda can call during execution
+```
+
+Keeping these separate makes the security model easier to explain.
+
+---
+
+## 28. `iam:PassRole`
+
+`iam:PassRole` is important when an authorized user or service assigns an IAM role to another AWS service.
+
+Conceptually:
+
+```text
+Operator
+   │
+   ▼
+Create / Configure EC2 or Lambda
+   │
+   ▼
+Pass Approved Role
+   │
+   ▼
+AWS Service Uses Role
+```
+
+`iam:PassRole` does not mean the operator assumes that role.
+
+It means the operator is authorized to pass the role to the supported AWS service.
+
+---
+
+## 29. IAM Troubleshooting
+
+### Lambda gets `AccessDenied` for SSM
+
+Check:
+
+```text
 Lambda Execution Role
-```
-
-### Resource-Based Policy
-
-Attached directly to a resource.
-
-Examples include:
-
-```text
-SNS Topic Policy
-Lambda Resource Policy
-```
-
-For example, the SNS topic can have a resource policy controlling which principals are allowed to publish to it.
-
----
-
-# 21. SNS Resource Policy Concept
-
-Example structure:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowSpecificPrincipal",
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::ACCOUNT_ID:role/Cloudops-NOC-Lambda-Execution-Role"
-      },
-      "Action": "SNS:Publish",
-      "Resource": "arn:aws:sns:ap-south-1:ACCOUNT_ID:cloudops-sns"
-    }
-  ]
-}
-```
-
-The exact resource policy should be adapted to the actual project configuration.
-
----
-
-# 22. IAM Security Controls
-
-The project implements the following IAM security controls:
-
-- IAM Roles instead of permanent access keys.
-- Separate EC2 and Lambda roles.
-- Least-privilege permissions.
-- Service-specific trust policies.
-- No credentials embedded in application code.
-- CloudWatch logging for Lambda execution.
-- Controlled Systems Manager access.
-- Controlled SNS publishing.
-
----
-
-# 23. IAM Verification
-
-The following AWS CLI commands can be used for inspection and verification.
-
-## List IAM Roles
-
-```bash
-aws iam list-roles
-```
-
-## Get EC2 Role
-
-```bash
-aws iam get-role \
-  --role-name cloudops-EC2-inline-role
-```
-
-## List Role Policies
-
-```bash
-aws iam list-role-policies \
-  --role-name cloudops-EC2-inline-role
-```
-
-## Get Inline Policy
-
-```bash
-aws iam get-role-policy \
-  --role-name cloudops-EC2-inline-role \
-  --policy-name POLICY_NAME
-```
-
-## List Attached Policies
-
-```bash
-aws iam list-attached-role-policies \
-  --role-name cloudops-EC2-inline-role
-```
-
-These commands are intended for inspection and verification.
-
----
-
-# 24. IAM Troubleshooting
-
-## Problem: SSM Agent Cannot Register
-
-Check:
-
-```text
-EC2 IAM Role
-        │
-        ▼
-AmazonSSMManagedInstanceCore
-```
-
-Verify:
-
-- IAM role is attached to EC2.
-- Instance Profile is associated correctly.
-- SSM Agent is running.
-- EC2 has required network connectivity.
-
----
-
-## Problem: CloudWatch Metrics Are Missing
-
-Check:
-
-```text
-CloudWatch Agent
        │
        ▼
-EC2 IAM Role
-       │
-       ▼
-cloudwatch:PutMetricData
-```
-
-Verify:
-
-- CloudWatch Agent is running.
-- IAM role is attached.
-- Required CloudWatch permissions exist.
-- Agent configuration is correct.
-
----
-
-## Problem: Lambda Cannot Execute SSM Command
-
-Check:
-
-```text
-Lambda
-  │
-  ▼
-Lambda Execution Role
-  │
-  ▼
 ssm:SendCommand
+       │
+       ▼
+Target Instance + SSM Document
 ```
 
-Verify:
+Verify that the target resource matches the policy scope.
 
-- Correct execution role is attached.
-- `ssm:SendCommand` permission exists.
-- Target EC2 instance is a managed node.
-- SSM Agent is online.
+### Lambda can send command but cannot read result
 
----
+Check:
 
-## Problem: Lambda Cannot Publish SNS Notification
+```text
+ssm:GetCommandInvocation
+```
 
-Verify:
+### SNS notification fails
+
+Check:
 
 ```text
 sns:Publish
 ```
 
-and confirm the policy resource points to the correct SNS topic ARN.
+and verify the topic ARN matches the policy.
 
----
+### Incident counter fails
 
-## Problem: Lambda Logs Are Missing
-
-Verify that the Lambda execution role has:
+Check:
 
 ```text
-logs:CreateLogGroup
-logs:CreateLogStream
-logs:PutLogEvents
+ssm:GetParameter
+ssm:PutParameter
 ```
 
-Then check the Lambda log group in CloudWatch Logs.
+and verify the Parameter Store path matches the policy.
+
+### EC2 is not an SSM managed node
+
+Check:
+
+- EC2 role attachment.
+- SSM Agent status.
+- Required SSM Agent permissions.
+- Network connectivity.
+
+### CloudWatch Agent cannot publish metrics
+
+Check:
+
+```text
+cloudwatch:PutMetricData
+```
+
+and the `CWAgent` namespace condition.
 
 ---
 
-# 25. IAM Relationship With the Seven Project Services
+## 30. IAM Verification
+
+Useful AWS CLI inspection commands include:
+
+```bash
+aws iam list-roles
+```
+
+```bash
+aws iam get-role --role-name <ROLE_NAME>
+```
+
+```bash
+aws iam list-role-policies --role-name <ROLE_NAME>
+```
+
+```bash
+aws iam get-role-policy \
+  --role-name <ROLE_NAME> \
+  --policy-name <POLICY_NAME>
+```
+
+These commands are useful for inspection and troubleshooting.
+
+---
+
+## 31. Integration with the Seven AWS Services
 
 | Service | IAM Relationship |
 |---|---|
-| IAM | Provides identity and authorization |
-| EC2 | Uses an IAM Instance Profile |
-| VPC | Provides network isolation; IAM controls AWS API access separately |
-| CloudWatch | Receives metrics and stores logs through authorized roles |
-| SNS | Distributes notifications and can use resource policies |
-| Systems Manager | Uses EC2 role for SSM Agent communication |
-| Lambda | Uses an execution role for AWS API operations |
+| VPC | Operator permissions may control VPC resource management |
+| EC2 | Uses an instance role for CloudWatch/SSM access |
+| CloudWatch | Receives metrics/logs through authorized agents |
+| Lambda | Uses an execution role for runtime AWS API calls |
+| SSM | Requires permissions on both Lambda and EC2 sides |
+| SNS | Lambda requires permission to publish notifications |
+| IAM | Provides the authorization model across the workflow |
 
 ---
 
-# 26. Security Best Practices
+## 32. Three-Level Interview Answer
 
-The following practices should be maintained throughout the project:
+### Level 1
 
-- Never hardcode AWS access keys.
-- Never commit credentials to GitHub.
-- Use IAM Roles for EC2 and Lambda.
-- Use separate roles for separate workloads.
-- Keep permissions as narrow as practical.
-- Review IAM policies regularly.
-- Remove unused permissions.
-- Restrict resource ARNs where supported.
-- Monitor failed AWS API calls.
-- Use CloudTrail in production environments when centralized API auditing is required.
+> **IAM is the authorization and least-privilege access-control layer of my project.**
+
+### Level 2
+
+> **The project uses separate IAM roles for EC2 and Lambda. The EC2 role allows the CloudWatch Agent and SSM Agent to communicate with AWS services, while the Lambda role allows only the required operations such as SSM command execution, command-result retrieval, SNS publishing, EC2 read access, Parameter Store access, and logging.**
+
+### Level 3
+
+> **The Lambda inline policy scopes `ssm:SendCommand` to the approved EC2 target and `AWS-RunShellScript`, allows `ssm:GetCommandInvocation`, permits `sns:Publish` only to the project SNS topic, provides `ec2:DescribeInstances`, and grants read/write access to the project incident-counter parameter path. The EC2 policy allows CloudWatch Agent metrics in the `CWAgent` namespace, log publishing, supporting EC2 reads, and the SSM Agent communication actions required for managed-node operation. Trust policies separately define which AWS service may assume each role.**
 
 ---
 
-# 27. Current Project Scope
+## 33. Operational Summary
 
-The IAM implementation supports the project's current automation scope:
+IAM can be remembered as:
 
 ```text
-P1 — Apache HTTPD Auto-Remediation
-P2 — CPU Utilization Monitoring
+IDENTITY
+   │
+   ▼
+ASSUME ROLE
+   │
+   ▼
+TEMPORARY CREDENTIALS
+   │
+   ▼
+POLICY EVALUATION
+   │
+   ▼
+ALLOW / DENY
 ```
 
-IAM permissions should support these implemented workflows without introducing unnecessary permissions for unrelated automation.
-
-The project does not require additional IAM roles for unused services or future technologies until those technologies are actually implemented.
-
----
-
-# 28. Final IAM Architecture
+Easy interview memory:
 
 ```text
-                         IAM
-                          │
-             ┌────────────┴────────────┐
-             │                         │
-             ▼                         ▼
-      EC2 IAM Role             Lambda Execution Role
-             │                         │
-             ├── SSM                  ├── SSM
-             │                        ├── SNS
-             ├── CloudWatch           └── CloudWatch Logs
-             │
-             └── CloudWatch Logs
-                          │
-                          ▼
-                    AWS Services
-```
+Trust Policy
+= Who can assume?
 
-IAM acts as the authorization layer that connects the project's compute, monitoring, notification, and automation components securely.
+Permission Policy
+= What can they do?
+
+Least Privilege
+= Only what is required.
+```
 
 ---
 
-# Conclusion
+## 34. Final Architecture Summary
 
-AWS IAM is a critical security component of the CloudOps NOC Automation project.
+```text
+CloudWatch Alarm
+      │
+      ▼
+Lambda
+      │
+      ▼
+Lambda Execution Role
+      │
+      ├── SSM SendCommand
+      ├── SSM GetCommandInvocation
+      ├── Parameter Store
+      ├── EC2 Describe
+      ├── SNS Publish
+      └── CloudWatch Logs
 
-The EC2 instance uses an IAM Instance Profile to obtain temporary credentials for Systems Manager and CloudWatch operations. Lambda uses a separate execution role to execute SSM commands, write execution logs, and publish remediation notifications.
+EC2
+ │
+ ▼
+EC2 Instance Role
+ │
+ ├── CloudWatch Agent
+ └── SSM Agent
+```
 
-By separating roles, using service-specific trust policies, avoiding hardcoded credentials, and applying least-privilege permissions, the project establishes a secure authorization model for its seven-service AWS architecture.
+IAM surrounds the operational workflow by controlling every AWS API action.
 
-The IAM configuration should always be maintained together with its JSON policies, trust relationships, and verification procedures so that the complete environment can be reproduced and securely maintained.
+---
+
+## Key Design Statement
+
+> **IAM does not perform monitoring or remediation. It authorizes the services that do. The project separates EC2 and Lambda permissions, uses role-based temporary credentials, and applies least privilege so each component can perform only the AWS actions required by its responsibility.**
