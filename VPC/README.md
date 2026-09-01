@@ -1,110 +1,155 @@
-# Amazon VPC Configuration
+# Amazon VPC — Network Foundation and Connectivity
 
 ## Overview
 
-Amazon Virtual Private Cloud (VPC) provides the network foundation for the CloudOps NOC Automation project.
+Amazon Virtual Private Cloud (Amazon VPC) provides the **network foundation** for the CloudOps NOC Automation V2.0 project.
 
-The VPC isolates the EC2-based Apache web server within a dedicated AWS network and provides controlled connectivity between the server, the internet, and AWS managed services used by the automation workflow.
+The VPC provides the logically isolated AWS network in which the EC2-based Apache HTTPD server runs. It defines the IP address space, subnet, routing, internet connectivity, and network-level access controls required by the workload.
 
-The VPC is part of the project's seven-service AWS architecture:
+The project uses a simple single-VPC design:
 
-- IAM
-- EC2
-- VPC
-- CloudWatch
-- SNS
-- Systems Manager (SSM)
-- Lambda
+```text
+Internet
+   │
+   ▼
+Internet Gateway
+   │
+   ▼
+Route Table
+   │
+   ▼
+cloudops-vpc
+10.0.0.0/16
+   │
+   ▼
+Public Subnet
+10.0.0.0/28
+   │
+   ▼
+Security Group
+   │
+   ▼
+EC2
+cloudops-server
+   │
+   ▼
+Apache HTTPD
+```
+
+In simple terms:
+
+> **VPC provides the network environment. EC2 runs the workload. CloudWatch monitors it. Lambda decides. SSM executes. SNS notifies. IAM authorizes.**
 
 ---
 
-# 1. Purpose
+## 1. Role in the Project
 
-The VPC is responsible for providing:
+The VPC is responsible for:
 
-- Network isolation for the EC2 instance
-- IP addressing through a private CIDR range
-- Public connectivity for the Apache server
-- Routing between the subnet and the internet
-- Network-level access control through Security Groups
-- Connectivity required by CloudWatch Agent and SSM Agent
+- Providing a logically isolated AWS network.
+- Defining the private IPv4 address range.
+- Hosting the EC2 subnet.
+- Providing routing between the subnet and the internet.
+- Supporting public HTTP access to the Apache server.
+- Applying Security Group rules to the EC2 network interface.
+- Providing the network environment required by the CloudWatch Agent and SSM Agent.
+- Supporting communication between the EC2 instance and required AWS service endpoints.
+
+The VPC does **not** perform monitoring, incident classification, remediation, or notification.
 
 ---
 
-# 2. VPC Architecture
+## 2. Current VPC Configuration
 
-The project uses a simple single-VPC architecture.
+| Property | Current Project Value |
+|---|---|
+| VPC Name | `cloudops-vpc` |
+| CIDR Block | `10.0.0.0/16` |
+| IPv4 | Enabled |
+| Region | `ap-south-1` |
+| Purpose | CloudOps NOC network foundation |
+
+The `10.0.0.0/16` CIDR provides the private address space for the VPC and leaves room for future subnet expansion.
+
+---
+
+## 3. Current Network Architecture
 
 ```text
                          Internet
                             │
                             ▼
-                  Internet Gateway
                      cloudops-igw
+                    Internet Gateway
                             │
                             ▼
-                     Route Table
                       cloudops-rt
+                       Route Table
                             │
                             ▼
-              ┌─────────────────────────┐
-              │      cloudops-vpc       │
-              │       10.0.0.0/16       │
-              │                         │
-              │   Public Subnet         │
-              │   10.0.0.0/28           │
-              │        │                │
-              │        ▼                │
-              │   EC2 Instance          │
-              │   cloudops-server       │
-              │        │                │
-              │   cloudops-sg           │
-              └─────────────────────────┘
+              ┌───────────────────────────┐
+              │       cloudops-vpc        │
+              │        10.0.0.0/16        │
+              │                           │
+              │   cloudops-subnet         │
+              │      10.0.0.0/28          │
+              │       Public              │
+              │          │                │
+              │          ▼                │
+              │     cloudops-server       │
+              │        EC2                │
+              │          │                │
+              │     cloudops-sg           │
+              └───────────────────────────┘
 ```
 
----
+The current design intentionally uses:
 
-# 3. VPC Configuration
+```text
+1 VPC
+1 Public Subnet
+1 EC2 Instance
+```
 
-| Property | Value |
-|---|---|
-| VPC Name | cloudops-vpc |
-| CIDR Block | 10.0.0.0/16 |
-| IPv4 | Enabled |
-| Region | ap-south-1 |
-| Purpose | CloudOps NOC infrastructure |
-
-The `10.0.0.0/16` CIDR provides a large private IP address range for the project and allows future expansion.
+This keeps the implementation simple and aligned with the project scope.
 
 ---
 
-# 4. Subnet Configuration
+## 4. Subnet Configuration
 
-The EC2 instance is deployed inside a public subnet.
+The EC2 instance is deployed in:
 
-| Property | Value |
+```text
+cloudops-subnet
+```
+
+| Property | Current Project Value |
 |---|---|
-| Subnet Name | cloudops-subnet |
-| CIDR | 10.0.0.0/28 |
+| Subnet Name | `cloudops-subnet` |
+| CIDR | `10.0.0.0/28` |
 | Type | Public |
-| Availability Zone | ap-south-1a |
-| Purpose | Hosts EC2 instance |
+| Availability Zone | `ap-south-1a` |
+| Purpose | Hosts the EC2 workload |
 
-The subnet is considered public because its associated route table contains a default route to the Internet Gateway.
+The subnet is considered public because its associated route table has a default route to an Internet Gateway.
+
+Important:
+
+> A subnet is not public only because it has a public IP range. It is public because its routing allows internet-bound traffic through an Internet Gateway.
 
 ---
 
-# 5. Internet Gateway
+## 5. Internet Gateway
 
-## Resource
+The project uses:
 
 ```text
 cloudops-igw
 ```
 
-The Internet Gateway provides internet connectivity for resources in the public subnet.
+The Internet Gateway enables internet connectivity between the VPC and the public internet when the required routing and resource configuration are present.
 
-Traffic flow:
+Conceptually:
 
 ```text
 EC2
@@ -122,57 +167,76 @@ Internet Gateway
 Internet
 ```
 
-The Internet Gateway does not provide access by itself. The subnet must also have an appropriate route through its route table, and the EC2 instance must have a public IPv4 address when direct internet communication is required.
+The Internet Gateway alone does not make a resource reachable.
+
+The EC2 instance also requires:
+
+- An appropriate public IPv4 configuration for direct internet communication.
+- A route to the Internet Gateway.
+- Security Group rules that allow the intended traffic.
 
 ---
 
-# 6. Route Table
+## 6. Route Table
 
-## Route Table
+The project route table is:
 
 ```text
 cloudops-rt
 ```
 
-The route table contains the default internet route.
+Current important routes:
 
 | Destination | Target |
 |---|---|
-| 10.0.0.0/16 | Local |
-| 0.0.0.0/0 | cloudops-igw |
+| `10.0.0.0/16` | Local |
+| `0.0.0.0/0` | `cloudops-igw` |
 
-The local route allows communication within the VPC.
+The local route provides internal VPC routing.
 
-The `0.0.0.0/0` route sends internet-bound traffic through the Internet Gateway.
+The default route:
+
+```text
+0.0.0.0/0
+```
+
+sends internet-bound IPv4 traffic toward the Internet Gateway.
 
 ---
 
-# 7. Route Table Association
+## 7. Route Table Association
 
-The route table is associated with:
+`cloudops-rt` is associated with:
 
 ```text
 cloudops-subnet
 ```
 
-This association makes the subnet use the configured routes.
+Conceptually:
 
 ```text
 cloudops-vpc
-      │
-      └── cloudops-subnet
-                │
-                └── cloudops-rt
-                         │
-                         └── 0.0.0.0/0
-                                  │
-                                  ▼
-                           cloudops-igw
+     │
+     ▼
+cloudops-subnet
+     │
+     ▼
+cloudops-rt
+     │
+     ▼
+0.0.0.0/0
+     │
+     ▼
+cloudops-igw
 ```
+
+The route table determines **where traffic should go**.
+
+It does not determine whether the traffic is authorized.
 
 ---
 
-# 8. Security Group
+## 8. Security Group
 
 The EC2 instance uses:
 
@@ -180,314 +244,581 @@ The EC2 instance uses:
 cloudops-sg
 ```
 
-The Security Group provides stateful network-level access control.
+A Security Group is a **stateful virtual firewall** associated with the EC2 network interface.
 
-## Inbound Rules
+### Current Inbound Intent
 
 | Protocol | Port | Source | Purpose |
 |---|---:|---|---|
-| TCP | 22 | Administrator/My IP | Administrative access |
-| TCP | 80 | 0.0.0.0/0 | Apache HTTP access |
+| TCP | 22 | Administrator / trusted IP | Administrative access |
+| TCP | 80 | `0.0.0.0/0` | Apache HTTP access |
 
-Port `22` should be restricted to the administrator's trusted IP address rather than being exposed to the entire internet.
+Port `22` should be restricted to a trusted administrator source.
 
-Port `80` is open to the internet because the Apache web server is intended to receive HTTP requests.
+Port `80` is exposed because the current project uses HTTP for the Apache web server.
 
-## Outbound Rules
+### Outbound
 
-The project currently allows outbound traffic.
+The current project allows outbound traffic required for:
 
-Outbound connectivity is required for the EC2 instance to communicate with AWS services and external resources.
+- AWS service communication.
+- CloudWatch Agent publishing.
+- SSM Agent communication.
+- Package or external connectivity where required.
 
 ---
 
-# 9. EC2 Network Flow
+## 9. Route Table vs Security Group
 
-The Apache server is deployed inside the VPC as follows:
+These controls have different jobs.
 
 ```text
+Route Table
+= Where should traffic go?
+
+Security Group
+= Is this traffic allowed?
+```
+
+Example:
+
+```text
+Destination route exists
+        │
+        ▼
+Security Group still evaluates access
+```
+
+Having a route does not automatically grant network access.
+
+---
+
+## 10. EC2 Network Interface
+
+The EC2 instance communicates with the VPC through an Elastic Network Interface (ENI).
+
+Conceptually:
+
+```text
+AWS VPC View
+     │
+     ▼
+EC2 ENI
+     │
+     ↕
+Linux View
+     │
+     ▼
+ens5
+```
+
+The ENI is the AWS-side virtual network interface.
+
+`ens5` is the Linux-side interface name commonly presented to the guest operating system.
+
+They should not be treated as two independent routing devices.
+
+---
+
+## 11. User Request Flow
+
+A simplified HTTP request path is:
+
+```text
+Browser
+   │
+   ▼
+User Network
+   │
+   ▼
 Internet
+   │
+   ▼
+AWS Internet Gateway
+   │
+   ▼
+VPC Routing
+   │
+   ▼
+Security Group Evaluation
+   │
+   ▼
+EC2 ENI
+   │
+   ▼
+ens5
+   │
+   ▼
+Linux Kernel
+   │
+   ▼
+IP
+   │
+   ▼
+TCP :80
+   │
+   ▼
+Socket
+   │
+   ▼
+Apache HTTPD
+```
+
+This is a **conceptual network flow**.
+
+VPC, route tables, and Security Groups are AWS logical networking controls, not physical boxes that a packet literally moves through one by one.
+
+---
+
+## 12. Response Flow
+
+The response travels back through the networking stack:
+
+```text
+HTTPD
+   │
+   ▼
+HTTP Response
+   │
+   ▼
+Socket
+   │
+   ▼
+TCP
+   │
+   ▼
+IP
+   │
+   ▼
+Linux Kernel
+   │
+   ▼
+ens5
+   │
+   ▼
+EC2 ENI
+   │
+   ▼
+VPC Networking
    │
    ▼
 Internet Gateway
    │
    ▼
-Route Table
+Internet
    │
    ▼
-Public Subnet
-   │
-   ▼
-Security Group
-   │
-   ▼
-EC2 Instance
-   │
-   ▼
-Apache HTTP Server
+Browser
 ```
 
 ---
 
-# 10. AWS Service Communication
+## 13. Correct AWS Service Communication
 
-The VPC provides the network environment for the EC2 instance, while AWS managed services handle monitoring and automation.
+The current V2.0 incident architecture is:
 
 ```text
-                    AWS Cloud
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-      CloudWatch                  SNS
-          │                         │
-          │                         ▼
-          │                       Lambda
-          │                         │
-          │                         ▼
-          │                        SSM
-          │                         │
-          └──────────┬──────────────┘
-                     │
-                     ▼
-              EC2 Instance
-              cloudops-server
-                     │
-                     ▼
-              Apache / httpd
+EC2 / HTTPD
+     │
+     ▼
+CloudWatch
+     │
+     ▼
+Lambda
+     │
+  ┌──┴───────────┐
+  ▼              ▼
+ SSM            SNS
+  │              │
+  ▼              ▼
+ EC2          Engineer
 ```
 
-The EC2 instance uses its IAM role to authenticate to AWS APIs. Network connectivity and IAM authorization are separate controls: being able to reach an AWS service does not by itself grant permission to use it.
+This replaces the old documentation pattern:
+
+```text
+CloudWatch
+   │
+   ▼
+SNS
+   │
+   ▼
+Lambda
+```
+
+That old flow is not the current V2.0 architecture.
+
+The current event path is:
+
+```text
+CloudWatch Alarm
+      │
+      ▼
+Lambda
+```
+
+SNS is used after Lambda processing for notification.
 
 ---
 
-# 11. VPC and Systems Manager
+## 14. VPC and CloudWatch
 
-AWS Systems Manager is used to remotely execute commands on the EC2 instance.
+The VPC provides the network environment for the EC2 instance that runs the CloudWatch Agent.
 
-The workflow is:
+P1 monitoring:
+
+```text
+EC2
+ │
+ ▼
+HTTPD
+ │
+ ▼
+CloudWatch Agent
+ │
+ ▼
+procstat
+ │
+ ▼
+procstat_lookup_pid_count
+ │
+ ▼
+CloudWatch
+```
+
+P2 monitoring:
+
+```text
+EC2
+ │
+ ▼
+CPUUtilization
+ │
+ ▼
+CloudWatch
+```
+
+The CloudWatch Agent requires connectivity to the appropriate CloudWatch service endpoints.
+
+The VPC provides the network environment, while IAM separately determines whether AWS API operations are authorized.
+
+---
+
+## 15. VPC and Systems Manager
+
+The P1/P2 management path is:
 
 ```text
 Lambda
    │
    ▼
-SSM Run Command
+Systems Manager
    │
    ▼
-SSM Agent on EC2
+SSM Agent
    │
    ▼
+EC2 Linux
+```
+
+The SSM Agent communicates outbound with AWS Systems Manager services.
+
+This allows the automation workflow to manage the instance without requiring a direct Lambda-to-EC2 SSH connection.
+
+For P1:
+
+```text
+SSM
+ │
+ ▼
 systemctl restart httpd
 ```
 
-The EC2 instance requires network connectivity to the Systems Manager service endpoints.
-
-The SSM Agent communicates outbound to AWS services, eliminating the need for inbound SSH access for the automated remediation workflow.
-
----
-
-# 12. VPC and CloudWatch
-
-The CloudWatch Agent runs on the EC2 instance and publishes system metrics to CloudWatch.
+For P2:
 
 ```text
-EC2
+SSM
  │
- └── CloudWatch Agent
-          │
-          ▼
-      CloudWatch
-          │
-          ▼
-       Alarm
-          │
-          ▼
-         SNS
+ ▼
+CPU / Load / Process / Memory Diagnostics
 ```
-
-The EC2 instance requires outbound network connectivity for the CloudWatch Agent to communicate with CloudWatch endpoints.
 
 ---
 
-# 13. Network Security Design
+## 16. VPC and IAM
 
-The project uses multiple layers of network and identity controls.
+Networking and authorization are separate controls.
 
-### Layer 1 — VPC
+```text
+Network Reachability
+        ≠
+AWS Permission
+```
+
+A system may be able to reach an AWS service endpoint but still receive:
+
+```text
+AccessDenied
+```
+
+if IAM does not authorize the API request.
+
+Easy distinction:
+
+```text
+VPC / Networking
+= Can the communication path exist?
+
+IAM
+= Is the AWS action authorized?
+```
+
+---
+
+## 17. VPC and SNS
+
+SNS is an AWS-managed notification service.
+
+In the current project:
+
+```text
+Lambda
+   │
+   ▼
+SNS
+   │
+   ▼
+Engineer
+```
+
+The VPC hosts the EC2 workload, but SNS is not placed inside the EC2 subnet as part of the current architecture.
+
+Do not describe SNS as the path that triggers Lambda.
+
+---
+
+## 18. Network Security Layers
+
+The current project uses multiple controls.
+
+### VPC
 
 Provides logical network isolation.
 
-### Layer 2 — Subnet
+### Subnet
 
-Defines the network segment where the EC2 instance operates.
+Defines the IP network segment in which EC2 runs.
 
-### Layer 3 — Route Table
+### Route Table
 
-Controls where network traffic is routed.
+Controls traffic routing.
 
-### Layer 4 — Internet Gateway
+### Internet Gateway
 
-Provides internet connectivity for the public subnet.
+Provides the VPC's internet connectivity path.
 
-### Layer 5 — Security Group
+### Security Group
 
-Controls inbound and outbound network traffic to the EC2 instance.
+Controls allowed traffic to and from the EC2 network interface.
 
-### Layer 6 — IAM
+### IAM
 
-Controls whether the EC2 instance and AWS services are authorized to call AWS APIs.
+Controls authorization for AWS API actions.
 
----
-
-# 14. Important Network Security Considerations
-
-The current project uses a public subnet because the Apache server needs to be reachable through HTTP.
-
-For a production environment, the architecture can be hardened by:
-
-- Restricting SSH to trusted administrator IP addresses.
-- Preferably using Systems Manager Session Manager instead of SSH.
-- Placing application servers in private subnets.
-- Using an Application Load Balancer for public traffic.
-- Using HTTPS instead of plain HTTP.
-- Using separate public and private subnets.
-- Restricting outbound traffic where practical.
-
-These are future enhancements and are not part of the current implemented seven-service project scope.
+These controls work together but solve different problems.
 
 ---
 
-# 15. VPC Verification Commands
+## 19. Current Scope vs Production Enhancements
 
-The following Linux commands can be used on the EC2 instance to verify network configuration.
+The current implemented design is intentionally simple.
 
-## Display IP Addresses
+Current:
+
+```text
+1 VPC
+1 Public Subnet
+1 EC2 Instance
+```
+
+The project does not currently implement:
+
+- Multi-AZ architecture.
+- NAT Gateway.
+- Application Load Balancer.
+- Auto Scaling Group.
+- Private application subnets.
+- Full multi-tier application architecture.
+
+Possible future hardening could include:
+
+```text
+Internet
+   │
+   ▼
+Application Load Balancer
+   │
+   ▼
+Private Application Subnets
+   │
+   ▼
+EC2 Instances
+```
+
+with private AWS service connectivity or appropriate outbound architecture where required.
+
+These are future production enhancements, not part of the current seven-service implementation.
+
+---
+
+## 20. Why the Current Design Uses a Public Subnet
+
+The current project is a learning and automation implementation centered on a single HTTPD workload.
+
+A public subnet provides a simple path for:
+
+- User HTTP access.
+- EC2 outbound connectivity.
+- CloudWatch Agent communication.
+- SSM Agent communication.
+
+This keeps the current architecture easy to build and troubleshoot.
+
+It is not intended to represent the final hardened architecture for a large production application.
+
+---
+
+## 21. VPC Verification Commands
+
+### Display IP addresses
 
 ```bash
 ip addr
 ```
 
-## Display Routing Table
+### Display Linux routing
 
 ```bash
 ip route
 ```
 
-## Check DNS Resolution
-
-```bash
-nslookup amazon.com
-```
-
-or:
+### Check DNS resolution
 
 ```bash
 getent hosts amazon.com
 ```
 
-## Test Internet Connectivity
+### Test HTTPS connectivity
 
 ```bash
 curl -I https://aws.amazon.com
 ```
 
-## Check Apache
+### Check HTTPD
 
 ```bash
 systemctl status httpd
 ```
 
-## Check Listening Ports
+### Check listening ports
 
 ```bash
 ss -tulnp
 ```
 
+### Check interface
+
+```bash
+ip addr show ens5
+```
+
+These commands verify the guest operating-system view of networking.
+
 ---
 
-# 16. AWS CLI Verification
+## 22. AWS CLI Verification
 
-If AWS CLI is used for verification, the following commands can be used.
+AWS CLI can be used for infrastructure inspection where appropriate.
 
-## List VPCs
+Examples:
 
 ```bash
 aws ec2 describe-vpcs
 ```
 
-## List Subnets
-
 ```bash
 aws ec2 describe-subnets
 ```
-
-## List Route Tables
 
 ```bash
 aws ec2 describe-route-tables
 ```
 
-## List Internet Gateways
-
 ```bash
 aws ec2 describe-internet-gateways
 ```
-
-## List Security Groups
 
 ```bash
 aws ec2 describe-security-groups
 ```
 
-These commands are for inspection and verification of the infrastructure.
+These commands are for inspection and verification, not for changing the project's preferred Lambda deployment method.
 
 ---
 
-# 17. VPC Troubleshooting
+## 23. Troubleshooting — Website Not Reachable
 
-## Problem: EC2 Cannot Reach the Internet
-
-Check:
+Follow the path layer by layer:
 
 ```text
-EC2
- ↓
-Subnet
- ↓
-Route Table
- ↓
+Browser
+   │
+   ▼
+Public IP / Connectivity
+   │
+   ▼
 Internet Gateway
+   │
+   ▼
+Route Table
+   │
+   ▼
+Security Group
+   │
+   ▼
+EC2 Network
+   │
+   ▼
+HTTPD
 ```
 
-Verify:
-
-1. EC2 has a public IPv4 address if direct internet access is required.
-2. The subnet is associated with the correct route table.
-3. Route `0.0.0.0/0` points to the Internet Gateway.
-4. Security Group outbound traffic permits the connection.
-5. Network ACLs are not blocking traffic.
-6. DNS resolution is working.
-
----
-
-## Problem: Apache Cannot Be Accessed
-
 Check:
+
+1. EC2 is running.
+2. EC2 has the expected public connectivity.
+3. `0.0.0.0/0` points to the Internet Gateway.
+4. The subnet uses the expected route table.
+5. Security Group allows TCP port 80.
+6. HTTPD is active.
+7. HTTPD is listening on port 80.
+
+Useful commands:
 
 ```bash
 systemctl status httpd
 ```
 
-Then verify:
-
 ```bash
-ss -tulnp | grep :80
+ss -lntp | grep :80
 ```
 
-Also verify that Security Group port `80` is allowed.
+```bash
+curl http://localhost
+```
 
 ---
 
-## Problem: SSM Managed Node Is Offline
+## 24. Troubleshooting — SSM Managed Node Offline
 
 Check:
 
@@ -497,14 +828,19 @@ sudo systemctl status amazon-ssm-agent
 
 Then verify:
 
-- EC2 IAM role
-- Network connectivity
-- SSM Agent status
-- AWS Systems Manager managed-node status
+- EC2 IAM role.
+- Required network connectivity.
+- SSM Agent status.
+- Correct AWS Region.
+- Systems Manager managed-node status.
+
+Remember:
+
+> SSM automation does not require inbound SSH connectivity.
 
 ---
 
-## Problem: CloudWatch Metrics Are Missing
+## 25. Troubleshooting — CloudWatch Metrics Missing
 
 Check:
 
@@ -512,110 +848,146 @@ Check:
 sudo systemctl status amazon-cloudwatch-agent
 ```
 
-Then inspect:
+Inspect:
 
 ```text
 /opt/aws/amazon-cloudwatch-agent/logs/
 ```
 
-Also verify:
+Then verify:
 
-- IAM permissions
-- Network connectivity
-- Agent configuration
-- CloudWatch namespace and metric configuration
+- CloudWatch Agent configuration.
+- IAM permissions.
+- Network connectivity.
+- Correct Region.
+- Expected CloudWatch namespace and metric.
 
----
-
-# 18. VPC Relationship With Project Services
-
-| Service | Relationship With VPC |
-|---|---|
-| IAM | Controls authorization for EC2 and AWS API access |
-| EC2 | Runs inside the VPC |
-| VPC | Provides network infrastructure |
-| CloudWatch | Receives EC2 monitoring metrics |
-| SNS | Receives alarm notifications |
-| SSM | Communicates with the EC2 SSM Agent |
-| Lambda | Executes the remediation workflow |
-
----
-
-# 19. Current Project Scope
-
-The implemented network architecture intentionally remains simple.
+For P1, also verify:
 
 ```text
-1 VPC
-   │
-   └── 1 Public Subnet
-           │
-           └── 1 EC2 Instance
-                   │
-                   ├── Apache
-                   ├── CloudWatch Agent
-                   └── SSM Agent
+procstat lookup = httpd
 ```
 
-The project does not currently implement:
+---
 
-- Multiple Availability Zones
-- NAT Gateway
-- Application Load Balancer
-- Auto Scaling Group
-- Private application subnets
-- Multi-tier application architecture
+## 26. Relationship with the Seven AWS Services
 
-These can be introduced as future enhancements without changing the core CloudOps NOC automation workflow.
+| Service | Relationship with VPC |
+|---|---|
+| IAM | Authorizes AWS API operations |
+| EC2 | Runs inside the VPC |
+| VPC | Provides the network foundation |
+| CloudWatch | Monitors the EC2 workload and receives metrics/logs |
+| Lambda | Receives direct alarm events and orchestrates incident workflows |
+| Systems Manager | Communicates with the EC2 managed node |
+| SNS | Delivers notifications published by Lambda |
+
+Important correction:
+
+> **SNS receives operational notifications from Lambda; it is not the alarm-event bridge between CloudWatch and Lambda.**
 
 ---
 
-# 20. Best Practices
+## 27. Three-Level Interview Answer
 
-- Use meaningful resource names.
-- Use CIDR ranges that allow future expansion.
-- Restrict administrative access.
-- Avoid exposing unnecessary ports.
-- Prefer Systems Manager over SSH for administration.
-- Use IAM roles instead of static credentials.
-- Monitor EC2 network and system health.
-- Document route-table and Security Group changes.
-- Review inbound and outbound rules periodically.
+### Level 1
+
+> **VPC provides the network foundation and logical network boundary for my project.**
+
+### Level 2
+
+> **The EC2 workload runs inside `cloudops-vpc` in a public subnet. The VPC provides the IP address space, route table, Internet Gateway connectivity, and Security Group controls required for user access and AWS service communication.**
+
+### Level 3
+
+> **The VPC uses CIDR `10.0.0.0/16`, with `cloudops-subnet` using `10.0.0.0/28` in `ap-south-1a`. `cloudops-rt` provides the local VPC route and a `0.0.0.0/0` route to `cloudops-igw`. The EC2 instance communicates through its ENI, represented inside Linux by `ens5`, while `cloudops-sg` controls permitted traffic. The VPC provides network reachability, while IAM separately controls whether AWS API actions are authorized.**
 
 ---
 
-# 21. Final Architecture Summary
+## 28. Operational Summary
 
-The VPC provides the network foundation for the CloudOps NOC Automation project.
+VPC can be remembered as:
 
-The architecture consists of:
+```text
+ADDRESS
+   │
+   ▼
+SEGMENT
+   │
+   ▼
+ROUTE
+   │
+   ▼
+ALLOW
+   │
+   ▼
+CONNECT
+```
+
+Meaning:
+
+```text
+CIDR
+Subnet
+Route Table
+Security Group
+Internet / AWS Connectivity
+```
+
+VPC does not:
+
+- Detect HTTPD failure.
+- Evaluate CloudWatch alarms.
+- Restart HTTPD.
+- Decide P1 or P2.
+- Publish SNS incident messages.
+
+---
+
+## 29. Final Architecture Summary
 
 ```text
 cloudops-vpc
+10.0.0.0/16
     │
     ├── cloudops-subnet
-    │       │
-    │       └── cloudops-server
-    │                │
-    │                ├── Apache
-    │                ├── CloudWatch Agent
-    │                └── SSM Agent
+    │      10.0.0.0/28
+    │          │
+    │          ▼
+    │    cloudops-server
+    │          │
+    │    ┌─────┴─────┐
+    │    ▼           ▼
+    │  CW Agent    SSM Agent
     │
     ├── cloudops-rt
-    │
-    ├── cloudops-igw
+    │          │
+    │          ▼
+    │    cloudops-igw
     │
     └── cloudops-sg
 ```
 
-This network foundation enables the EC2 server to communicate with the AWS services required for monitoring, notification, and automated remediation.
+Operationally:
+
+```text
+EC2 / HTTPD
+     │
+     ▼
+CloudWatch
+     │
+     ▼
+Lambda
+  ┌──┴──────────┐
+  ▼             ▼
+ SSM           SNS
+  │             │
+  ▼             ▼
+ EC2         Engineer
+```
 
 ---
 
-# Conclusion
+## Key Design Statement
 
-Amazon VPC forms the networking foundation of the CloudOps NOC Automation project. It provides logical isolation, IP addressing, routing, internet connectivity, and network-level access control for the EC2-based Apache server.
-
-The VPC works together with IAM, EC2, CloudWatch, SNS, Lambda, and Systems Manager to support the complete monitoring and auto-remediation workflow.
-
-The current design is intentionally simple and suitable for the project's single-EC2 NOC automation environment while leaving a clear path for future expansion into private subnets, load balancing, multiple Availability Zones, and Auto Scaling.
+> **Amazon VPC provides the network environment for the EC2 workload. It controls addressing, subnet placement, routing, internet connectivity, and network access, while CloudWatch, Lambda, SSM, SNS, and IAM handle monitoring, decision-making, execution, notification, and authorization respectively.**
