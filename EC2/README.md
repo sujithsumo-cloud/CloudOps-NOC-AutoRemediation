@@ -1,46 +1,52 @@
-# Amazon EC2 – Configuration & Operations
+# Amazon EC2 — Workload Hosting, Linux Runtime, and Managed Operations
 
-## Project
+## Overview
 
-**CloudOps NOC Automation**
+Amazon EC2 is the **compute and workload-hosting layer** of the CloudOps NOC Automation V2.0 project.
 
-## Service
+The EC2 instance hosts the Apache HTTPD web server and runs the supporting agents required for monitoring and controlled operations:
 
-**Amazon Elastic Compute Cloud (EC2)**
+```text
+Amazon EC2
+   │
+   ├── Amazon Linux
+   ├── Apache HTTPD
+   ├── CloudWatch Agent
+   └── SSM Agent
+```
+
+The EC2 instance is the workload being monitored and the target on which approved recovery or diagnostic commands are executed.
+
+In simple terms:
+
+> **EC2 hosts the workload. CloudWatch observes it. Lambda decides. SSM manages it.**
 
 ---
 
-# 1. Overview
+## 1. Role in the Project
 
-Amazon EC2 provides the compute environment for the CloudOps NOC Automation project.
+EC2 is responsible for:
 
-The EC2 instance hosts the Apache HTTP Server and provides the target environment for monitoring and automated remediation. The instance is integrated with Amazon CloudWatch, AWS Systems Manager (SSM), IAM, SNS, and Lambda to implement the NOC incident-response workflow.
-
-The EC2 instance is therefore the primary workload resource monitored and managed by the automation system.
-
----
-
-# 2. Purpose
-
-The EC2 instance is responsible for:
-
-- Hosting the Apache HTTP Server.
-- Serving HTTP requests.
+- Hosting the Linux operating system.
+- Running Apache HTTPD.
+- Serving web requests.
 - Running the CloudWatch Agent.
 - Running the SSM Agent.
-- Publishing monitoring metrics through the CloudWatch Agent.
-- Receiving automated remediation commands through Systems Manager.
-- Providing the target environment for Lambda-driven recovery.
-- Generating operating-system and application logs for troubleshooting.
+- Exposing process and operating-system state for monitoring.
+- Receiving approved Systems Manager commands.
+- Providing application and operating-system logs.
+- Acting as the P1 remediation target.
+- Acting as the P2 diagnostic target.
+
+EC2 itself does **not** decide when remediation should happen.
 
 ---
 
-# 3. EC2 Configuration
+## 2. Current EC2 Project Configuration
 
 | Property | Project Configuration |
-| --- | --- |
+|---|---|
 | Instance Name | `cloudops-server` |
-| Instance ID | `i-0b7d483631875bb1c` |
 | Operating System | Amazon Linux 2023 |
 | Instance Type | `t3.micro` |
 | Architecture | x86_64 |
@@ -54,78 +60,93 @@ The EC2 instance is responsible for:
 
 ---
 
-# 4. EC2 Role in the NOC Architecture
+## 3. Correct V2.0 Architecture
 
-EC2 is the monitored workload in the project.
-
-The relationship between the services is:
+The current project architecture is:
 
 ```text
-                 IAM
-                  |
-                  | Permissions
-                  v
-VPC ---------> EC2 Server
-                  |
-             Apache httpd
-                  |
-          CloudWatch Agent
-                  |
-                  v
-             CloudWatch
-                  |
-              Alarm
-                  |
-                  v
-                 SNS
-                  |
-                  v
-               Lambda
-                  |
-                  v
-                 SSM
-                  |
-                  v
-             EC2 / httpd
+                         IAM
+                          │
+                          ▼
+                         EC2
+                          │
+                   Apache HTTPD
+                          │
+                  CloudWatch Agent
+                          │
+                          ▼
+                     CloudWatch
+                          │
+                     Alarm Event
+                          │
+                          ▼
+                       Lambda
+                          │
+                ┌─────────┴─────────┐
+                ▼                   ▼
+               SSM                 SNS
+                │                   │
+                ▼                   ▼
+               EC2               Engineer
 ```
 
-The EC2 instance is therefore both:
+Important:
 
-- The **application hosting environment**
-- The **target of automated remediation**
+> **SNS is not between CloudWatch and Lambda in the current V2.0 architecture.**
+
+Correct:
+
+```text
+CloudWatch → Lambda → SSM → EC2
+                    └────→ SNS
+```
+
+Not:
+
+```text
+CloudWatch → SNS → Lambda
+```
 
 ---
 
-# 5. Operating System
+## 4. EC2 as the Workload Host
 
-The server runs:
+The EC2 instance provides the runtime environment for:
 
 ```text
-Amazon Linux 2023
+Amazon Linux
+    │
+    ▼
+Apache HTTPD
+    │
+    ▼
+Web Workload
 ```
 
-The operating system provides the environment required for:
+HTTPD is the primary P1 workload monitored by the project.
 
-- Apache
-- CloudWatch Agent
-- SSM Agent
-- Python-based operational tooling
-- Shell scripts
-- Linux system administration
+The Linux operating system provides:
+
+- Process management.
+- CPU scheduling.
+- Memory management.
+- File systems.
+- Networking.
+- Service management through `systemd`.
 
 ---
 
-# 6. Apache HTTP Server
+## 5. Apache HTTPD
 
-Apache is the primary application monitored by the project.
+Apache HTTPD is the web server used in the project.
 
-### Service Name
+### Service name
 
 ```text
 httpd
 ```
 
-### Common Commands
+### Common commands
 
 Check status:
 
@@ -157,10 +178,10 @@ Enable at boot:
 systemctl enable httpd
 ```
 
-Check the running process:
+Check processes:
 
 ```bash
-ps -ef | grep httpd
+pgrep -a httpd
 ```
 
 Check HTTP port:
@@ -171,115 +192,189 @@ ss -lntp | grep :80
 
 ---
 
-# 7. CloudWatch Agent
+## 6. Linux `systemd` and HTTPD
 
-The CloudWatch Agent runs directly on the EC2 instance.
-
-Its purpose is to collect operating-system and application-related metrics and publish them to Amazon CloudWatch.
-
-### Metrics Used
-
-The project monitors areas including:
-
-- CPU utilization
-- Memory utilization
-- Disk utilization
-- Disk I/O
-- Network traffic
-- Apache process count
-
-### Agent Service
-
-```bash
-systemctl status amazon-cloudwatch-agent
-```
-
-Start:
-
-```bash
-systemctl start amazon-cloudwatch-agent
-```
-
-Restart:
-
-```bash
-systemctl restart amazon-cloudwatch-agent
-```
-
-Enable:
-
-```bash
-systemctl enable amazon-cloudwatch-agent
-```
-
----
-
-# 8. CloudWatch Agent Configuration
-
-The CloudWatch Agent configuration is maintained on the EC2 instance.
-
-Typical configuration location:
-
-```text
-/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/
-```
-
-The configuration defines:
-
-- Metric collection
-- Collection interval
-- CPU monitoring
-- Memory monitoring
-- Disk monitoring
-- Network monitoring
-- Apache process monitoring
-
-The project uses a **60-second monitoring interval** for the configured metrics.
-
----
-
-# 9. Apache Process Monitoring
-
-Apache availability is monitored through the process state.
-
-The monitored process is:
-
-```text
-httpd
-```
-
-The monitoring logic checks whether the Apache process is available.
+Linux uses `systemd` as the service manager.
 
 Conceptually:
 
 ```text
-httpd process available
-        |
-        v
-Normal monitoring state
-
-httpd process unavailable
-        |
-        v
-CloudWatch Alarm
-        |
-        v
-NOC Automation
+systemctl restart httpd
+        │
+        ▼
+      systemd
+        │
+        ▼
+   httpd.service
+        │
+        ▼
+ Apache HTTPD Processes
 ```
 
-The P1 workflow uses the existing project alarm:
+Important responsibility distinction:
 
 ```text
-NOC-cloudops-automate
+SSM
+= provides remote command execution
+
+systemctl
+= sends the local service-management request
+
+systemd
+= performs the actual service management
 ```
+
+Therefore, the most accurate explanation is:
+
+> **Systems Manager provides the controlled execution path, while Linux systemd performs the actual HTTPD restart.**
 
 ---
 
-# 10. SSM Agent
+## 7. HTTPD Processes and PIDs
 
-The SSM Agent runs on the EC2 instance and allows AWS Systems Manager to manage the server without requiring the automation workflow to establish an SSH connection.
+When Apache runs, Linux can maintain:
 
-### Check SSM Agent
+```text
+HTTPD Parent Process
+      │
+      ├── Worker Process
+      ├── Worker Process
+      └── Worker Process
+```
+
+Each process has a PID.
+
+Multiple HTTPD PIDs can exist even when there are no active users because Apache can keep worker processes ready for future requests.
+
+Therefore:
+
+> **PID count is not user count.**
+
+and:
+
+> **PID count is not request count.**
+
+The project uses process count as a process-presence signal for P1.
+
+---
+
+## 8. CloudWatch Agent
+
+The CloudWatch Agent runs on EC2 and collects configured operating-system, process, network, and log data.
+
+Conceptually:
+
+```text
+EC2 Linux
+    │
+    ▼
+CloudWatch Agent
+    │
+    ▼
+Amazon CloudWatch
+```
+
+The project uses a 60-second collection interval for the configured agent metrics.
+
+The agent supports visibility into areas such as:
+
+- Memory
+- Disk
+- Network
+- HTTPD process count
+- Selected Apache/Linux logs
+
+---
+
+## 9. P1 HTTPD Process Monitoring
+
+The P1 monitoring path is:
+
+```text
+HTTPD
+  │
+  ▼
+CloudWatch Agent
+  │
+  ▼
+procstat
+  │
+  ▼
+procstat_lookup_pid_count
+  │
+  ▼
+CloudWatch
+  │
+  ▼
+NOC-cloudops-automate
+```
+
+The current P1 alarm evaluates:
+
+```text
+procstat_lookup_pid_count < 1
+```
+
+When no matching HTTPD process is present, the alarm can transition to `ALARM`.
+
+---
+
+## 10. P1 Correct End-to-End Flow
+
+The finalized P1 path is:
+
+```text
+HTTPD Failure
+     │
+     ▼
+CloudWatch Agent
+     │
+     ▼
+procstat_lookup_pid_count
+     │
+     ▼
+NOC-cloudops-automate
+     │
+     ▼
+CloudWatch Alarm Event
+     │
+     ▼
+Lambda
+     │
+     ▼
+Actionable Alarm Gate
+     │
+     ▼
+SSM Run Command
+     │
+     ▼
+SSM Agent
+     │
+     ▼
+EC2 Linux
+     │
+     ▼
+systemctl restart httpd
+     │
+     ▼
+Verification
+     │
+     ▼
+Stability Check
+     │
+     ▼
+SNS Notification / Escalation
+```
+
+SNS is used **after incident processing**, not as the Lambda trigger.
+
+---
+
+## 11. SSM Agent
+
+The SSM Agent runs on the EC2 instance and enables controlled Systems Manager operations.
+
+### Check status
 
 ```bash
 systemctl status amazon-ssm-agent
@@ -297,453 +392,563 @@ Restart:
 systemctl restart amazon-ssm-agent
 ```
 
-Enable:
+Enable at boot:
 
 ```bash
 systemctl enable amazon-ssm-agent
 ```
 
-The EC2 instance must remain registered as a Systems Manager managed node for automated remediation to work.
+For automated management to work, the EC2 instance must remain available as an SSM managed node.
 
 ---
 
-# 11. Automated Remediation
+## 12. Why SSM Instead of Direct SSH
 
-When the monitored Apache service fails, the EC2 instance becomes the target of the automated recovery workflow.
+The automation does not require Lambda to establish an SSH session with EC2.
 
-The remediation sequence is:
+Current path:
 
 ```text
-Apache Failure
-      |
-      v
-CloudWatch Detection
-      |
-      v
-NOC-cloudops-automate
-      |
-      v
-SNS
-      |
-      v
 Lambda
-      |
-      v
-SSM Run Command
-      |
-      v
-EC2
-      |
-      v
+  │
+  ▼
+AWS API
+  │
+  ▼
+Systems Manager
+  │
+  ▼
+SSM Agent
+  │
+  ▼
+EC2 Linux
+```
+
+This avoids making the incident workflow depend on:
+
+- Lambda-managed SSH keys.
+- Direct Lambda-to-EC2 SSH sessions.
+- Port 22 for automated remediation.
+
+The workflow uses IAM-controlled AWS APIs instead.
+
+---
+
+## 13. P1 Remediation
+
+For P1, Lambda requests:
+
+```bash
 systemctl restart httpd
-      |
-      v
-Apache Recovery
 ```
 
-The EC2 instance does not directly decide to restart itself.
+through Systems Manager.
 
-Instead, the recovery action is orchestrated through:
+The EC2 instance receives the command through the SSM Agent.
 
-**CloudWatch → SNS → Lambda → SSM → EC2**
+```text
+Lambda
+   │
+   ▼
+SSM
+   │
+   ▼
+SSM Agent
+   │
+   ▼
+EC2
+   │
+   ▼
+systemctl restart httpd
+```
+
+EC2 is the execution target.
+
+It does not determine whether the action is allowed.
+
+That decision belongs to Lambda.
 
 ---
 
-# 12. IAM Integration
+## 14. P1 Verification and Stability
 
-The EC2 instance uses the IAM role:
+After the restart, the project verifies:
 
-```text
-cloudops-EC2-inline-role
+```bash
+systemctl is-active httpd
 ```
 
-The role provides the permissions required for the EC2-based monitoring and management components to communicate with AWS services.
+Immediate verification asks:
 
-The project follows the principle of:
+> **Did HTTPD recover now?**
+
+The stability check asks:
+
+> **Did HTTPD remain healthy after the initial recovery?**
+
+The current workflow performs the stability recheck after approximately 15 seconds.
+
+If required, the current P1 workflow allows one automatic retry before escalation.
+
+---
+
+## 15. P2 — CPU Diagnostics
+
+The P2 alarm is:
+
+```text
+cpu alert
+```
+
+using:
+
+```text
+AWS/EC2
+CPUUtilization
+```
+
+P2 is **diagnostic-only**.
+
+The workflow is:
 
 ```text
 EC2
- |
- v
-IAM Role
- |
- v
-AWS Service Permissions
+ │
+ ▼
+CPUUtilization
+ │
+ ▼
+CloudWatch
+ │
+ ▼
+cpu alert
+ │
+ ▼
+Lambda
+ │
+ ▼
+SSM
+ │
+ ▼
+EC2 Diagnostics
+ │
+ ▼
+SNS
+ │
+ ▼
+Engineer
 ```
 
-No permanent AWS access keys are required to be stored on the EC2 instance.
+There is no automatic HTTPD restart or EC2 reboot for P2.
 
 ---
 
-# 13. Network Integration
+## 16. P2 Diagnostic Commands
 
-The EC2 instance is deployed inside the project's VPC.
+Systems Manager collects evidence from the EC2 operating system.
+
+Examples include:
+
+```bash
+uptime
+ps aux --sort=-%cpu | head -11
+free -h
+```
+
+These help identify:
+
+- System load.
+- Top CPU-consuming processes.
+- Memory state.
+
+High CPU can have multiple root causes, so human review remains part of the P2 workflow.
+
+---
+
+## 17. P1 vs P2 on EC2
+
+| Characteristic | P1 — HTTPD | P2 — CPU |
+|---|---|---|
+| EC2 role | Recovery target | Diagnostic target |
+| Detection signal | HTTPD process count | CPUUtilization |
+| Automatic corrective action | Yes | No |
+| SSM command type | Restart + verify | Diagnostics |
+| Final decision | Automated unless escalation required | Engineer review |
+
+Core principle:
+
+> **Detection does not automatically mean remediation.**
+
+---
+
+## 18. IAM Integration
+
+The EC2 instance uses an IAM role for the AWS permissions required by the monitoring and management components.
+
+Conceptually:
+
+```text
+EC2
+ │
+ ▼
+IAM Role
+ │
+ ▼
+Temporary AWS Credentials
+ │
+ ▼
+Authorized AWS Service Access
+```
+
+The design avoids storing permanent AWS access keys on the instance.
+
+The project follows the **Principle of Least Privilege**.
+
+---
+
+## 19. VPC Integration
+
+The EC2 instance is deployed inside:
 
 ```text
 cloudops-vpc
-       |
-       v
+      │
+      ▼
 cloudops-subnet
-       |
-       v
+      │
+      ▼
 cloudops-server
 ```
 
-The instance is associated with the project Security Group:
+The associated Security Group is:
 
 ```text
 cloudops-sg
 ```
 
-The Security Group controls the network traffic permitted to and from the EC2 instance.
+The VPC provides the network environment.
+
+The Security Group controls permitted network traffic to and from the instance.
 
 ---
 
-# 14. Security Configuration
+## 20. User Request Network Flow
 
-The EC2 implementation follows these security practices:
+A simplified user request path is:
 
-- IAM Role-based AWS authentication.
-- No hardcoded AWS access keys.
-- Security Group-based network filtering.
-- SSM-based remote management.
-- Limited administrative access.
-- CloudWatch-based monitoring.
-- Operational logs for troubleshooting.
+```text
+Browser
+   │
+   ▼
+Internet
+   │
+   ▼
+Internet Gateway
+   │
+   ▼
+VPC Routing
+   │
+   ▼
+Security Group
+   │
+   ▼
+EC2 ENI
+   │
+   ▼
+ens5
+   │
+   ▼
+Linux Kernel
+   │
+   ▼
+TCP :80
+   │
+   ▼
+Socket
+   │
+   ▼
+HTTPD
+```
 
-The automation workflow uses Systems Manager rather than requiring Lambda to connect directly to the server through SSH.
+This is the user/data path.
+
+It is different from the monitoring and management path.
 
 ---
 
-# 15. Logging and Troubleshooting
+## 21. Monitoring Flow vs Management Flow
 
-The EC2 instance provides several useful sources for troubleshooting.
-
-### Operating System Logs
+### Monitoring
 
 ```text
-/var/log/messages
+HTTPD / Linux
+      │
+      ▼
+CloudWatch Agent
+      │
+      ▼
+CloudWatch
 ```
 
-View recent messages:
-
-```bash
-tail -n 100 /var/log/messages
-```
-
-Follow logs:
-
-```bash
-tail -f /var/log/messages
-```
-
-### SSM Agent Logs
+### Management
 
 ```text
-/var/log/amazon/ssm/
+Lambda
+  │
+  ▼
+SSM
+  │
+  ▼
+SSM Agent
+  │
+  ▼
+Linux
 ```
 
-### CloudWatch Agent Logs
+### User Traffic
 
 ```text
-/opt/aws/amazon-cloudwatch-agent/logs/
+Browser
+  │
+  ▼
+Network
+  │
+  ▼
+HTTPD
 ```
 
-### Apache Logs
+These flows should not be mixed together.
 
-Common Apache log locations:
+---
+
+## 22. Logs and Troubleshooting
+
+### Apache logs
+
+Common path:
 
 ```text
 /var/log/httpd/
 ```
 
-Check Apache logs:
+Useful files include:
 
-```bash
-ls -lah /var/log/httpd/
+```text
+access_log
+error_log
 ```
+
+### SSM Agent logs
+
+```text
+/var/log/amazon/ssm/
+```
+
+### CloudWatch Agent logs
+
+```text
+/opt/aws/amazon-cloudwatch-agent/logs/
+```
+
+### Linux messages
+
+```text
+/var/log/messages
+```
+
+These logs help separate:
+
+- Application problems.
+- Agent problems.
+- Linux problems.
+- Automation transport problems.
 
 ---
 
-# 16. Basic EC2 Health Checks
+## 23. Basic EC2 Health Checks
 
-The following commands can be used during NOC troubleshooting.
-
-### Check System Uptime
+Check uptime:
 
 ```bash
 uptime
 ```
 
-### Check CPU and Processes
+Check CPU/processes:
 
 ```bash
 top
 ```
 
-### Check Memory
+Check memory:
 
 ```bash
 free -h
 ```
 
-### Check Disk
+Check disk:
 
 ```bash
 df -h
 ```
 
-### Check Network Ports
+Check network listeners:
 
 ```bash
 ss -lntp
 ```
 
-### Check Apache
+Check HTTPD:
 
 ```bash
 systemctl status httpd
 ```
 
-### Check CloudWatch Agent
+Check CloudWatch Agent:
 
 ```bash
 systemctl status amazon-cloudwatch-agent
 ```
 
-### Check SSM Agent
+Check SSM Agent:
 
 ```bash
 systemctl status amazon-ssm-agent
 ```
 
----
+Test HTTP locally:
 
-# 17. Installation Components
-
-The EC2 environment contains the components required for the project implementation.
-
-| Component | Purpose |
-| --- | --- |
-| Amazon Linux 2023 | Operating system |
-| Apache HTTP Server | Application workload |
-| CloudWatch Agent | Metric collection |
-| SSM Agent | AWS Systems Manager management |
-| Python | Automation/support tooling |
-| Shell utilities | Server administration |
-| Git | Project/source-code management |
-
-The exact installation and configuration scripts are maintained separately in the project repository.
+```bash
+curl http://localhost
+```
 
 ---
 
-# 18. Operational Dependency
-
-The EC2 automation workflow depends on the correct operation of several project components.
+## 24. Operational Dependencies
 
 | Dependency | Required For |
-| --- | --- |
-| VPC | Network connectivity |
-| IAM Role | AWS permissions |
-| Security Group | Network access |
-| CloudWatch Agent | Metric collection |
-| CloudWatch | Monitoring and alarms |
-| SNS | Event distribution |
-| Lambda | Automation logic |
-| SSM Agent | Remote command execution |
+|---|---|
+| VPC | EC2 network environment |
+| Security Group | Network traffic control |
+| IAM Role | AWS authorization |
+| CloudWatch Agent | P1 process-level monitoring |
+| CloudWatch | Alarm detection |
+| Lambda | Incident decision and orchestration |
+| SSM Agent | Managed command execution |
+| SNS | Operational notification |
 
-If one of these dependencies fails, the automated remediation workflow may not complete successfully.
+Important:
+
+> **SNS is a notification dependency, not an alarm-event distribution layer to Lambda in the current V2.0 architecture.**
 
 ---
 
-# 19. P1 and P2 Project Scope
+## 25. Security Practices
 
-The finalized project contains two operational severity levels.
+The EC2 implementation follows these practices:
 
-### P1 – HTTPD Automation
+- IAM role-based AWS access.
+- No hardcoded permanent AWS credentials.
+- Security Group network filtering.
+- Systems Manager-based managed operations.
+- Limited administrative access.
+- CloudWatch monitoring and logging.
+- Separation of decision logic from command execution.
 
-The P1 workflow focuses on Apache (`httpd`) service availability.
+---
+
+## 26. Three-Level Interview Answer
+
+### Level 1
+
+> **EC2 is the compute layer that hosts my Linux and Apache HTTPD workload.**
+
+### Level 2
+
+> **The EC2 instance runs Amazon Linux, Apache HTTPD, the CloudWatch Agent, and the SSM Agent. It is both the workload monitored by CloudWatch and the managed target on which Systems Manager executes P1 recovery or P2 diagnostic commands.**
+
+### Level 3
+
+> **Inside EC2, Linux systemd manages `httpd.service`, while the kernel manages the HTTPD processes, PIDs, memory, CPU, and networking. The CloudWatch Agent publishes the configured HTTPD process metric used by the P1 alarm, while the SSM Agent receives Systems Manager Run Command instructions. Lambda does not directly log in to EC2; it requests approved operations through SSM.**
+
+---
+
+## 27. EC2 Responsibility Summary
 
 ```text
-HTTPD Failure
-     |
-     v
+                    EC2
+                     │
+        ┌────────────┼────────────┐
+        ▼            ▼            ▼
+     Workload     Monitoring   Management
+     HTTPD        CW Agent     SSM Agent
+```
+
+EC2 provides the actual runtime environment.
+
+It does not:
+
+- Evaluate alarms.
+- Decide P1 or P2.
+- Apply the Actionable Alarm Gate.
+- Determine escalation.
+- Deliver SNS notifications.
+
+---
+
+## 28. Final Summary
+
+Amazon EC2 is the **central workload host and managed execution target** of CloudOps NOC Automation V2.0.
+
+The finalized P1 path is:
+
+```text
+EC2 / HTTPD
+     │
+     ▼
+CloudWatch Agent
+     │
+     ▼
 CloudWatch
-     |
-     v
+     │
+     ▼
+Lambda
+     │
+     ▼
+SSM
+     │
+     ▼
+EC2 / HTTPD
+     │
+     ▼
+Verification
+     │
+     ▼
 SNS
-     |
-     v
-Lambda
-     |
-     v
-SSM
-     |
-     v
-Restart HTTPD
 ```
 
-### P2 – CPU Utilization Automation
-
-The P2 workflow focuses on CPU utilization monitoring and automation.
+The finalized P2 path is:
 
 ```text
-EC2 CPU
-   |
-   v
+EC2 CPUUtilization
+        │
+        ▼
 CloudWatch
-   |
-   v
-P2 Alarm / Automation
-```
-
-P3 / Unknown Service behavior is **not part of the finalized project scope**.
-
----
-
-# 20. EC2 Operational Checklist
-
-Before considering the EC2 server healthy, verify:
-
-- [ ] EC2 instance is running.
-- [ ] Apache service is active.
-- [ ] HTTP port is listening.
-- [ ] CloudWatch Agent is running.
-- [ ] SSM Agent is running.
-- [ ] EC2 has the correct IAM role.
-- [ ] EC2 is visible as an SSM managed node.
-- [ ] CloudWatch metrics are updating.
-- [ ] Apache process monitoring is working.
-- [ ] Required logs are available.
-
----
-
-# 21. Common Failure Scenarios
-
-## Apache Failure
-
-```text
-Apache stopped
-     |
-     v
-CloudWatch alarm
-     |
-     v
+        │
+        ▼
 Lambda
-     |
-     v
-SSM
-     |
-     v
-Apache restart
-```
-
-Verify:
-
-```bash
-systemctl status httpd
-```
-
----
-
-## CloudWatch Agent Failure
-
-Symptoms:
-
-- Metrics stop updating.
-- Dashboard data becomes stale.
-- Apache monitoring may stop working.
-
-Verify:
-
-```bash
-systemctl status amazon-cloudwatch-agent
-```
-
-Restart if required:
-
-```bash
-systemctl restart amazon-cloudwatch-agent
-```
-
----
-
-## SSM Agent Failure
-
-Symptoms:
-
-- EC2 may no longer appear online in Systems Manager.
-- Lambda cannot successfully execute the remediation command.
-
-Verify:
-
-```bash
-systemctl status amazon-ssm-agent
-```
-
----
-
-# 22. EC2 Service Responsibility
-
-The EC2 component has four primary responsibilities in this project:
-
-```text
-                EC2
-                 |
-     +-----------+-----------+
-     |           |           |
-     v           v           v
-  Apache     Monitoring    Management
-  Server     Agent/Logs      SSM Agent
-```
-
-It provides the actual workload, exposes the service health that CloudWatch monitors, and receives automated recovery commands through Systems Manager.
-
----
-
-# 23. Related AWS Services
-
-The EC2 configuration integrates only with the seven AWS services defined for this project:
-
-| AWS Service | EC2 Relationship |
-| --- | --- |
-| IAM | Provides instance permissions |
-| VPC | Provides network environment |
-| CloudWatch | Receives monitoring metrics |
-| SNS | Receives/distributes incident events |
-| Lambda | Orchestrates remediation |
-| SSM | Executes commands on EC2 |
-| EC2 | Hosts the workload |
-
----
-
-# 24. Summary
-
-Amazon EC2 is the central workload component of the CloudOps NOC Automation project.
-
-It hosts the Apache HTTP Server and runs the CloudWatch Agent and SSM Agent required for monitoring and automated recovery.
-
-The complete P1 incident workflow is:
-
-```text
-EC2 / Apache
-     |
-     v
-CloudWatch
-     |
-     v
+        │
+        ▼
+SSM Diagnostics
+        │
+        ▼
 SNS
-     |
-     v
-Lambda
-     |
-     v
-SSM
-     |
-     v
-EC2 / Apache Restart
+        │
+        ▼
+Engineer
 ```
 
-IAM provides the required permissions, while VPC provides the network environment.
+---
 
-This configuration enables the project to demonstrate a practical AWS NOC workflow in which an application failure can be detected, automatically remediated, and reported with minimal manual intervention.
+## Key Design Statement
+
+> **EC2 hosts the workload and runs the monitoring and management agents. CloudWatch detects operational conditions, Lambda decides what action is allowed, Systems Manager executes approved commands on EC2, and SNS communicates the result.**
