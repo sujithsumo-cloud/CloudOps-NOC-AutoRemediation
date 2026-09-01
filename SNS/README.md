@@ -1,676 +1,876 @@
-# Amazon Simple Notification Service (SNS) Configuration
+# Amazon SNS — Operational Notification and Escalation
 
 ## Overview
 
-Amazon Simple Notification Service (Amazon SNS) is the messaging and event-distribution service used in the CloudOps NOC Automation project.
+Amazon Simple Notification Service (Amazon SNS) is the **operational notification layer** of the CloudOps NOC Automation V2.0 project.
 
-SNS receives notifications from Amazon CloudWatch when a configured alarm changes state and distributes those events to the appropriate subscribers.
+In the current V2.0 architecture, SNS is **not** used between CloudWatch and Lambda.
 
-In this project, SNS has two important responsibilities:
-
-- **P1 – HTTPD Failure:** Distribute the CloudWatch alarm event to AWS Lambda so that Apache can be automatically recovered through Systems Manager, while also notifying the NOC engineer.
-- **P2 – CPU Utilization:** Distribute the CloudWatch alarm notification to the NOC engineer for operational investigation.
-
-SNS therefore acts as the **communication and event-distribution layer** between CloudWatch monitoring and the automation/notification components.
-
----
-
-# 1. Purpose
-
-Amazon SNS is used to:
-
-- Receive CloudWatch alarm notifications.
-- Distribute monitoring events to subscribers.
-- Send email notifications to the NOC engineer.
-- Invoke the Lambda automation workflow for P1 incidents.
-- Decouple CloudWatch monitoring from downstream actions.
-- Support multiple subscribers for the same monitoring event.
-- Provide an event-driven communication mechanism.
-
----
-
-# 2. SNS Resource Used
-
-## SNS Topic
-
-**Topic Name**
-
-```text
-cloudops-sns
-```
-
-**Display Name**
-
-```text
-NOC-topic
-```
-
-The topic acts as the central event-distribution point for the CloudOps NOC workflow.
-
----
-
-# 3. Project Architecture
-
-```text
-                 Amazon CloudWatch
-                        │
-                        │ Alarm Event
-                        ▼
-                Amazon SNS Topic
-                  cloudops-sns
-                        │
-             ┌──────────┴──────────┐
-             │                     │
-             ▼                     ▼
-       NOC Engineer              Lambda
-          Email                    │
-                                   ▼
-                           Systems Manager
-                                   │
-                                   ▼
-                           Restart Apache
-```
-
----
-
-# 4. SNS Components
-
-| Component | Project Purpose |
-|---|---|
-| SNS Topic | Receives CloudWatch alarm events |
-| Email Subscription | Sends operational notifications |
-| Lambda Subscription | Starts P1 auto-remediation |
-| Topic Policy | Controls which services can publish/subscribe |
-| Subscription Confirmation | Confirms email delivery destination |
-
----
-
-# 5. SNS Topic Configuration
-
-| Property | Value |
-|---|---|
-| Topic Name | `cloudops-sns` |
-| Display Name | `NOC-topic` |
-| Region | `ap-south-1` |
-| Publisher | Amazon CloudWatch |
-| Subscribers | NOC Email, AWS Lambda |
-
-The topic is configured in the same AWS Region as the monitoring and automation resources.
-
----
-
-# 6. P1 – HTTPD Auto-Remediation
-
-The P1 workflow uses SNS as the event bridge between CloudWatch and Lambda.
-
-### Workflow
-
-```text
-Apache httpd Failure
-        ↓
-CloudWatch Agent
-        ↓
-CloudWatch Metric
-        ↓
-NOC-cloudops-automate
-        ↓
-ALARM State
-        ↓
-Amazon SNS
-        ↓
-cloudops-sns
-        ↓
-┌───────┴────────┐
-│                │
-▼                ▼
-Email          Lambda
-Alert            │
-                 ▼
-                SSM
-                 │
-                 ▼
-       systemctl restart httpd
-```
-
-### P1 Objective
-
-The objective is to reduce Apache downtime by automatically starting the remediation process when the monitored `httpd` process becomes unavailable.
-
----
-
-# 7. P2 – CPU Utilization Notification
-
-The P2 CPU monitoring workflow also uses SNS for event distribution.
-
-```text
-High CPU Utilization
-        ↓
-CloudWatch
-        ↓
-cloudops-cpuutilization
-        ↓
-ALARM State
-        ↓
-Amazon SNS
-        ↓
-NOC Engineer Email
-        ↓
-Engineer Investigation
-```
-
-P2 is an operational monitoring and notification workflow. It is separate from the P1 HTTPD auto-remediation process.
-
----
-
-# 8. Email Subscription
-
-An email subscription is configured for the SNS topic.
-
-### Purpose
-
-The subscription provides direct operational visibility to the NOC engineer.
-
-The email notification can contain information such as:
-
-- Alarm name
-- Alarm state
-- EC2 instance
-- Metric
-- Threshold
-- Time of incident
-- Recovery status
-
-### Subscription Process
-
-```text
-Create SNS Topic
-       ↓
-Create Email Subscription
-       ↓
-AWS sends Confirmation Email
-       ↓
-Administrator confirms subscription
-       ↓
-Subscription becomes Confirmed
-```
-
-An email subscription must be confirmed before SNS can deliver notifications to that email address.
-
----
-
-# 9. Lambda Subscription
-
-AWS Lambda is configured as an SNS subscriber for the P1 automation workflow.
-
-```text
-CloudWatch
-    ↓
-SNS
-    ↓
-Lambda
-    ↓
-SSM Run Command
-    ↓
-Restart httpd
-```
-
-When SNS invokes Lambda, the Lambda function receives the SNS event and processes the alarm information.
-
-### Lambda Function
-
-```text
-Cloudops-NOC-automate
-```
-
-The Lambda function then uses AWS Systems Manager to execute the required remediation command on the EC2 instance.
-
----
-
-# 10. SNS Message Flow
-
-The general message flow is:
+The current event path is:
 
 ```text
 CloudWatch Alarm
-       ↓
-SNS Publish
-       ↓
-SNS Topic
-       ↓
-Message Distribution
-       ├──────────────► Email
-       │
-       └──────────────► Lambda
-```
-
-SNS separates the monitoring layer from the consumers of the monitoring event.
-
-This allows additional subscribers to be added without changing the CloudWatch alarm itself.
-
----
-
-# 11. CloudWatch Integration
-
-CloudWatch publishes an alarm notification to the SNS topic when the configured alarm action is executed.
-
-For the project:
-
-### P1 Alarm
-
-```text
-NOC-cloudops-automate
-```
-
-Purpose:
-
-```text
-HTTPD Failure → Auto Remediation
-```
-
-### P2 Alarm
-
-```text
-cloudops-cpuutilization
-```
-
-Purpose:
-
-```text
-High CPU → Operational Notification
-```
-
-Both alarms use SNS as the notification/event-distribution mechanism.
-
----
-
-# 12. SNS and Lambda Integration
-
-The P1 integration is:
-
-```text
-CloudWatch
-    ↓
-SNS
-    ↓
+      │
+      ▼
+Direct Alarm Event
+      │
+      ▼
 Lambda
-    ↓
-Systems Manager
-    ↓
-EC2
 ```
 
-Lambda receives the SNS event and extracts the required alarm information before starting the remediation workflow.
+After Lambda processes the incident, Lambda publishes operational notifications to the SNS topic.
 
-This event-driven architecture avoids continuous polling by Lambda.
+The current notification path is:
+
+```text
+Lambda
+   │
+   ▼
+Amazon SNS
+   │
+   ▼
+Configured Subscriber
+   │
+   ▼
+Operations Engineer
+```
+
+In simple terms:
+
+> **CloudWatch detects. Lambda decides. SSM executes. SNS communicates the result.**
 
 ---
 
-# 13. SNS and IAM
+## 1. Role in the Project
 
-SNS access is controlled using AWS IAM and resource-based permissions where applicable.
+SNS is responsible for:
 
-The project follows the principle of least privilege.
+- Receiving incident notifications published by Lambda.
+- Delivering notifications to configured subscribers.
+- Reporting that a P1 incident has been detected and recovery has started.
+- Reporting successful P1 recovery.
+- Reporting failed P1 recovery and escalation.
+- Delivering P2 high-CPU diagnostic notifications.
+- Delivering the final P2 diagnostic report for engineer review.
 
-Required permissions should allow only the necessary operations, such as:
+SNS is the **notification transport**.
 
-- Publishing alarm notifications.
-- Invoking the Lambda subscriber.
-- Managing the required SNS resources.
-
-No permanent AWS access keys are required for the SNS workflow.
+It is not the monitoring service, decision engine, remediation engine, or Lambda trigger in the current V2.0 design.
 
 ---
 
-# 14. SNS Topic Policy
+## 2. SNS Resource
 
-An SNS topic policy can control which AWS principals are allowed to publish messages to the topic.
+### SNS Topic
+
+```text
+Topic Name   : cloudops-sns
+Display Name : NOC-topic
+Region       : ap-south-1
+```
+
+The Lambda function receives the SNS topic ARN through the environment variable:
+
+```text
+TOPIC_ARN
+```
+
+The Lambda code publishes notifications to this topic through Boto3.
 
 Conceptually:
 
 ```text
-Amazon CloudWatch
-        │
-        │ Publish
-        ▼
-   SNS Topic
+Lambda
+   │
+   ▼
+Boto3 SNS Client
+   │
+   ▼
+sns:Publish API
+   │
+   ▼
 cloudops-sns
 ```
 
-The policy should restrict publishing access to the required AWS service and account context.
-
-Example policy structure:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowCloudWatchPublish",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "cloudwatch.amazonaws.com"
-      },
-      "Action": "sns:Publish",
-      "Resource": "arn:aws:sns:ap-south-1:ACCOUNT_ID:cloudops-sns"
-    }
-  ]
-}
-```
-
-Replace `ACCOUNT_ID` with the appropriate AWS account ID when implementing the policy.
-
-The exact resource-based policy should be validated against the actual AWS account and service configuration before deployment.
-
 ---
 
-# 15. SNS Security
+## 3. Correct V2.0 Architecture
 
-The SNS configuration follows these security practices:
-
-- IAM-based access control.
-- Restricted topic permissions.
-- Confirmed email subscriptions.
-- No hardcoded AWS credentials.
-- HTTPS-based AWS service communication.
-- Least-privilege permissions.
-- Controlled Lambda integration.
-
----
-
-# 16. Notification Example
-
-A P1 recovery notification can communicate the result of the automated remediation.
-
-Example:
+The current project architecture is:
 
 ```text
-NOC AUTO REMEDIATION - SUCCESS
-
-Instance : cloudops-server
-
-Service  : httpd
-
-Action   : systemctl restart httpd
-
-Result   : Apache service is ACTIVE
-
-Status   : Incident resolved automatically
-```
-
-The actual notification content depends on the Lambda implementation and SNS message configuration.
-
----
-
-# 17. SNS Verification
-
-### Check Topic
-
-Verify that the topic exists:
-
-```text
-cloudops-sns
-```
-
-### Check Subscriptions
-
-Verify:
-
-```text
-Email → Confirmed
-Lambda → Connected
-```
-
-### Verify Topic Region
-
-```text
-ap-south-1
-```
-
-### Verify CloudWatch Alarm Action
-
-Confirm that the alarms reference the SNS topic.
-
----
-
-# 18. Testing SNS
-
-SNS should be tested independently before testing the complete automation workflow.
-
-### Test Sequence
-
-```text
-CloudWatch Alarm
-       ↓
-SNS Topic
-       ↓
-Email
-       ↓
-Lambda
-```
-
-For P1:
-
-```text
-SNS
- ↓
-Lambda
- ↓
-SSM
- ↓
-Apache Restart
-```
-
-Expected results:
-
-- SNS receives the CloudWatch event.
-- Email notification is delivered.
-- Lambda is invoked for the P1 workflow.
-- Lambda starts the SSM command.
-- Apache recovery is performed.
-- Recovery status is recorded.
-
----
-
-# 19. Troubleshooting
-
-## Email Not Received
-
-Check:
-
-1. SNS topic exists.
-2. Email subscription exists.
-3. Subscription status is `Confirmed`.
-4. Correct email address is configured.
-5. Check the email spam/junk folder.
-6. Verify the SNS topic is receiving messages.
-
----
-
-## Lambda Not Invoked
-
-Check:
-
-1. Lambda function exists.
-2. SNS subscription exists.
-3. SNS subscription is confirmed/active.
-4. Lambda has the appropriate invocation permission.
-5. CloudWatch alarm is publishing to the correct SNS topic.
-6. Check Lambda CloudWatch Logs.
-
----
-
-## CloudWatch Alarm Does Not Send SNS Notification
-
-Check:
-
-1. Alarm action is configured.
-2. Correct SNS topic ARN is configured.
-3. Alarm entered the expected state.
-4. SNS topic exists in the correct Region.
-5. CloudWatch alarm history.
-
----
-
-## SNS Topic Exists but No Event Arrives
-
-Check the complete chain:
-
-```text
-CloudWatch Alarm
-       ↓
-Alarm Action
-       ↓
-SNS Topic ARN
-       ↓
-SNS Topic
-       ↓
-Subscription
-```
-
-An error at any stage can prevent the notification from reaching the final subscriber.
-
----
-
-# 20. Operational Best Practices
-
-- Use descriptive SNS topic names.
-- Keep P1 and P2 workflows clearly documented.
-- Confirm email subscriptions.
-- Use least-privilege permissions.
-- Restrict SNS topic publishing permissions.
-- Monitor Lambda invocation failures.
-- Test notification delivery periodically.
-- Keep SNS configuration under version control.
-- Avoid sending unnecessary high-volume notifications.
-- Document all production subscribers.
-
----
-
-# 21. Repository Structure
-
-Recommended SNS repository structure:
-
-```text
-sns/
-│
-├── README.md
-│
-├── topic/
-│   ├── topic-configuration.md
-│   └── topic-policy.json
-│
-├── subscriptions/
-│   ├── email-subscription.md
-│   └── lambda-subscription.md
-│
-├── messages/
-│   ├── p1-httpd-success.md
-│   ├── p1-httpd-failure.md
-│   └── p2-cpu-alert.md
-│
-├── testing/
-│   └── sns-test-procedure.md
-│
-└── troubleshooting/
-    └── sns-troubleshooting.md
-```
-
----
-
-# 22. Integration With the Seven Project Services
-
-SNS is one component of the finalized seven-service AWS architecture.
-
-| Service | Relationship With SNS |
-|---|---|
-| IAM | Controls permissions |
-| EC2 | Hosts the monitored Apache service |
-| VPC | Provides the EC2 network environment |
-| CloudWatch | Publishes alarm events |
-| SNS | Distributes monitoring events |
-| Systems Manager | Performs EC2 command execution |
-| Lambda | Performs P1 automation |
-
-Complete architecture:
-
-```text
-IAM
- │
- ├── EC2
- │     │
- │     └── CloudWatch Agent
- │
- ├── CloudWatch
- │     │
- │     └── Alarms
- │
- ├── SNS
- │     ├── Email
- │     └── Lambda
- │             │
- │             ▼
- │          SSM
- │             │
- │             ▼
- │            EC2
- │
- └── VPC
-```
-
----
-
-# 23. Project Role Summary
-
-Amazon SNS is the **event-distribution and notification layer** of the CloudOps NOC Automation project.
-
-Its role can be summarized as:
-
-```text
-RECEIVE
-   ↓
-DISTRIBUTE
-   ↓
-NOTIFY
-   ↓
-TRIGGER
+                    CloudWatch
+                        │
+                        │ Direct Alarm Event
+                        ▼
+                      Lambda
+                        │
+             ┌──────────┴──────────┐
+             │                     │
+             ▼                     ▼
+            SSM                   SNS
+             │                     │
+             ▼                     ▼
+            EC2             Operations Engineer
 ```
 
 For P1:
 
 ```text
 HTTPD Failure
-     ↓
-CloudWatch
-     ↓
-SNS
-     ↓
+      │
+      ▼
+CloudWatch Alarm
+      │
+      ▼
 Lambda
-     ↓
-SSM
-     ↓
-Apache Restart
+      │
+      ▼
+SSM Recovery
+      │
+      ▼
+Verification
+      │
+      ▼
+Stability Check
+      │
+      ▼
+SNS Notification
 ```
 
 For P2:
 
 ```text
 High CPU
-     ↓
-CloudWatch
-     ↓
-SNS
-     ↓
-NOC Notification
+   │
+   ▼
+CloudWatch Alarm
+   │
+   ▼
+Lambda
+   │
+   ▼
+SSM Diagnostics
+   │
+   ▼
+SNS Diagnostic Report
+   │
+   ▼
+Engineer Review
 ```
 
 ---
 
-# 24. Final Summary
+## 4. Important Architecture Correction
 
-Amazon SNS provides the communication layer required to connect CloudWatch monitoring with the project's notification and automation workflows.
+The previous project documentation described this flow:
 
-When the **P1 HTTPD alarm** detects an Apache failure, CloudWatch publishes the event to the `cloudops-sns` topic. SNS distributes the event to the configured subscribers, including Lambda and the NOC engineer notification channel. Lambda then coordinates the Systems Manager remediation process.
+```text
+CloudWatch
+   │
+   ▼
+SNS
+   │
+   ▼
+Lambda
+```
 
-For **P2 CPU utilization**, SNS distributes the CloudWatch alarm notification to the NOC engineer for investigation.
+That is **not the current V2.0 architecture**.
 
-This design provides a loosely coupled, event-driven architecture in which monitoring, notification, and remediation components can operate independently while working together as a complete CloudOps NOC workflow.
+The current implementation uses:
+
+```text
+CloudWatch
+   │
+   ▼
+Lambda
+   │
+   ▼
+SNS
+```
+
+Therefore:
+
+- CloudWatch does not use SNS to trigger the Lambda function in the current design.
+- Lambda is not treated as an SNS subscriber for the incident-processing workflow.
+- Lambda receives the CloudWatch Alarm event directly.
+- Lambda publishes the operational result to SNS after incident processing.
+
+---
+
+## 5. Lambda and SNS Integration
+
+The Lambda function creates an SNS client using Boto3:
+
+```python
+sns = boto3.client("sns")
+```
+
+The Lambda environment contains:
+
+```text
+TOPIC_ARN
+```
+
+The notification function publishes using the SNS API:
+
+```python
+sns.publish(
+    TopicArn=TOPIC_ARN,
+    Subject=subject,
+    Message=body,
+)
+```
+
+Conceptually:
+
+```text
+Lambda Python Code
+       │
+       ▼
+      Boto3
+       │
+       ▼
+   SNS Publish API
+       │
+       ▼
+   cloudops-sns
+       │
+       ▼
+   Subscriber
+```
+
+Lambda decides **when and what to notify**.
+
+SNS is responsible for **delivering the published message**.
+
+---
+
+## 6. P1 — Initial Incident Notification
+
+When Lambda identifies an actionable P1 HTTPD incident, it first publishes an incident notification indicating that recovery has started.
+
+Conceptually:
+
+```text
+HTTPD Failure
+     │
+     ▼
+P1 Detected
+     │
+     ▼
+Lambda
+     │
+     ▼
+SNS
+     │
+     ▼
+"HTTPD Down — Recovery Initiated"
+```
+
+The notification can include information such as:
+
+- Incident ID
+- Priority and severity
+- HTTPD service
+- Detection time
+- Alarm state and reason
+- EC2 instance details
+- CloudWatch alarm details
+- Recovery status
+
+The engineer is therefore informed that the incident has been detected and that automated recovery is in progress.
+
+---
+
+## 7. P1 — Successful Recovery Notification
+
+After the P1 recovery command succeeds, Lambda verifies HTTPD and performs the stability verification.
+
+If HTTPD is confirmed active and stable:
+
+```text
+Detected
+   │
+   ▼
+Recovered
+   │
+   ▼
+Resolved
+   │
+   ▼
+SNS
+   │
+   ▼
+Success Notification
+```
+
+The final message can contain:
+
+- Initial SSM command result
+- Verification status
+- Stability verification status
+- Final HTTPD state
+- Recovery status
+- Resolution time
+- Whether manual action is required
+
+For successful recovery:
+
+```text
+Manual Action = Not Required
+```
+
+---
+
+## 8. P1 — Failure and Escalation Notification
+
+The P1 workflow uses a bounded recovery policy.
+
+If HTTPD cannot be confirmed active after the initial attempt and the configured retry:
+
+```text
+Initial Recovery
+      │
+      ▼
+Failed
+      │
+      ▼
+Retry
+      │
+      ▼
+Failed
+      │
+      ▼
+Escalated
+      │
+      ▼
+SNS
+      │
+      ▼
+Engineer
+```
+
+The notification indicates that:
+
+- Automatic remediation failed.
+- HTTPD could not be confirmed active.
+- Manual investigation is required.
+
+Important distinction:
+
+> **SNS does not perform escalation logic.**
+
+Lambda determines that the incident must be escalated.
+
+SNS delivers the escalation notification to the engineer.
+
+---
+
+## 9. P2 — Initial Diagnostic Notification
+
+P2 is based on the alarm:
+
+```text
+cpu alert
+```
+
+Metric:
+
+```text
+CPUUtilization
+```
+
+Configured project threshold:
+
+```text
+> 50%
+```
+
+When Lambda identifies P2, it publishes an initial notification indicating that CPU diagnostics are being collected.
+
+Conceptually:
+
+```text
+High CPU
+   │
+   ▼
+P2 Detected
+   │
+   ▼
+Lambda
+   │
+   ▼
+SNS
+   │
+   ▼
+"CPU Diagnostics In Progress"
+```
+
+P2 does not perform an automatic restart.
+
+---
+
+## 10. P2 — Diagnostic Report
+
+Lambda uses Systems Manager to collect evidence such as:
+
+```text
+uptime / load
+top CPU-consuming processes
+memory information
+```
+
+After diagnosis:
+
+```text
+P2
+ │
+ ▼
+SSM Diagnostics
+ │
+ ▼
+Diagnostic Output
+ │
+ ▼
+Lambda
+ │
+ ▼
+SNS
+ │
+ ▼
+Engineer Review
+```
+
+The final P2 notification indicates:
+
+```text
+Diagnosed
+   ↓
+No automatic fix applied
+   ↓
+Manual review required
+```
+
+This supports the project principle:
+
+> **Detection does not automatically mean remediation.**
+
+---
+
+## 11. P1 vs P2 SNS Usage
+
+| Incident | SNS Purpose |
+|---|---|
+| P1 HTTPD detected | Notify that automated recovery has started |
+| P1 recovered | Report successful recovery and verification |
+| P1 recovery failed | Deliver escalation notification |
+| P2 high CPU detected | Notify that diagnostics are being collected |
+| P2 diagnosis complete | Deliver diagnostic evidence for manual review |
+
+SNS is therefore used for **operational communication across both incident types**.
+
+---
+
+## 12. Notification Content
+
+The Lambda implementation builds detailed incident notifications.
+
+Typical information includes:
+
+```text
+Incident ID
+Priority
+Severity
+Environment
+Service
+Detection Time
+Alarm State
+Alarm Reason
+AWS Region
+EC2 Instance
+Private IP
+Availability Zone
+Alarm Name
+Metric
+Threshold
+SNS Topic
+SSM Command ID
+Verification Status
+Stability Status
+Recovery Status
+Resolution Time
+Manual Action
+```
+
+For P2, the notification can additionally include the captured diagnostic output.
+
+This provides the engineer with operational context rather than sending only a simple alarm name.
+
+---
+
+## 13. SNS Email Subscription
+
+An email subscription can be used to deliver SNS notifications to an operations engineer.
+
+Conceptually:
+
+```text
+SNS Topic
+   │
+   ▼
+Email Subscription
+   │
+   ▼
+Confirmation Required
+   │
+   ▼
+Confirmed
+   │
+   ▼
+Notification Delivery
+```
+
+An email subscription must be confirmed before SNS can deliver messages to that address.
+
+Verification should include:
+
+```text
+SNS Topic      : Exists
+Subscription   : Confirmed
+Region         : ap-south-1
+```
+
+---
+
+## 14. SNS and IAM
+
+Lambda must be authorized to publish to the SNS topic.
+
+Conceptually:
+
+```text
+Lambda Execution Role
+        │
+        ▼
+       IAM
+        │
+        ▼
+sns:Publish allowed?
+      /       \
+    YES        NO
+     │          │
+     ▼          ▼
+   Publish   AccessDenied
+```
+
+The project follows the **Principle of Least Privilege**.
+
+Lambda should receive permission only for the SNS topic and operations required by the workflow.
+
+A broad administrator policy is not required for SNS notification publishing.
+
+---
+
+## 15. Security Considerations
+
+SNS security considerations include:
+
+- IAM-based authorization.
+- Least-privilege `sns:Publish` permission.
+- Restricted access to the SNS topic.
+- Confirmed subscriber endpoints.
+- No hardcoded AWS access keys.
+- Protection of sensitive information in notification content.
+- Keeping the SNS topic ARN in configuration/environment settings rather than embedding credentials in code.
+
+The SNS topic should be used only by identities and workflows that require notification access.
+
+---
+
+## 16. SNS vs Escalation
+
+These two concepts should not be confused.
+
+### Escalation
+
+An operational decision:
+
+> Automation cannot safely resolve the incident, so human investigation is required.
+
+### SNS
+
+The AWS service used to communicate that decision.
+
+Conceptually:
+
+```text
+Automation Failure
+       │
+       ▼
+Lambda Decides to Escalate
+       │
+       ▼
+SNS Publishes Notification
+       │
+       ▼
+Engineer Receives Message
+```
+
+Therefore:
+
+> **Escalation is the process; SNS is the notification mechanism.**
+
+---
+
+## 17. SNS vs CloudWatch
+
+CloudWatch and SNS have different responsibilities.
+
+```text
+CloudWatch
+= Detect and evaluate
+
+SNS
+= Deliver notifications
+```
+
+CloudWatch answers:
+
+> **Has the monitored condition crossed the configured threshold?**
+
+SNS answers:
+
+> **Who needs to receive the resulting operational message?**
+
+---
+
+## 18. SNS vs Lambda
+
+Lambda and SNS also have different responsibilities.
+
+```text
+Lambda
+= Decide and orchestrate
+
+SNS
+= Deliver the message
+```
+
+Lambda determines:
+
+- Is the alarm actionable?
+- Is it P1 or P2?
+- Should recovery or diagnosis run?
+- Did recovery succeed?
+- Is escalation required?
+
+SNS does not make these decisions.
+
+---
+
+## 19. Testing SNS
+
+SNS can be tested as a notification component independently from the full incident workflow.
+
+### Basic SNS verification
+
+```text
+Lambda / Authorized Publisher
+          │
+          ▼
+       SNS Topic
+          │
+          ▼
+   Confirmed Subscriber
+          │
+          ▼
+  Notification Received
+```
+
+### Full P1 verification
+
+```text
+CloudWatch
+   │
+   ▼
+Lambda
+   │
+   ▼
+SSM
+   │
+   ▼
+HTTPD Recovery
+   │
+   ▼
+SNS
+   │
+   ▼
+P1 Notification
+```
+
+Expected result:
+
+- Lambda publishes the notification.
+- SNS receives the publication.
+- The configured subscriber receives the message.
+- The notification contains the expected incident status.
+
+---
+
+## 20. Troubleshooting
+
+### Notification Not Received
+
+Check:
+
+1. `cloudops-sns` exists.
+2. `TOPIC_ARN` in Lambda points to the correct topic.
+3. Lambda has `sns:Publish` permission.
+4. The subscription is confirmed.
+5. The subscriber endpoint is correct.
+6. Lambda logs show whether `sns.publish()` succeeded or failed.
+7. Check the email spam/junk folder where applicable.
+
+### Lambda Works but SNS Fails
+
+Check:
+
+```text
+Lambda
+   │
+   ▼
+TOPIC_ARN
+   │
+   ▼
+IAM Permission
+   │
+   ▼
+sns:Publish
+   │
+   ▼
+SNS Topic
+```
+
+### Important
+
+Do not troubleshoot Lambda invocation through an SNS subscription for the current V2.0 design.
+
+Lambda is triggered directly by the CloudWatch Alarm event.
+
+---
+
+## 21. Integration with the Seven AWS Services
+
+| Service | Relationship with SNS |
+|---|---|
+| IAM | Authorizes Lambda to publish |
+| EC2 | Hosts the workload described in notifications |
+| VPC | Provides the network environment for EC2 |
+| CloudWatch | Detects the incident before Lambda processing |
+| Lambda | Builds and publishes SNS notifications |
+| Systems Manager | Performs P1 remediation and P2 diagnostics |
+| SNS | Delivers operational results to subscribers |
+
+The current architecture is:
+
+```text
+EC2
+ │
+ ▼
+CloudWatch
+ │
+ ▼
+Lambda
+ ├──────────► SSM ──────────► EC2
+ │
+ └──────────► SNS ──────────► Engineer
+```
+
+IAM authorizes the AWS API interactions, and VPC provides the EC2 network foundation.
+
+---
+
+## 22. Three-Level Interview Answer
+
+### Level 1
+
+> **SNS is the operational notification layer of the project.**
+
+### Level 2
+
+> **Lambda publishes P1 recovery results, P1 escalation messages, and P2 diagnostic reports to SNS, and SNS delivers those notifications to the configured subscribers.**
+
+### Level 3
+
+> **The Lambda Python function creates a Boto3 SNS client and calls `sns.publish()` using the SNS topic ARN stored in `TOPIC_ARN`. SNS is downstream of Lambda in the current V2.0 architecture; it does not trigger Lambda. Lambda decides the incident outcome, while SNS provides the notification delivery mechanism.**
+
+---
+
+## 23. Operational Summary
+
+SNS can be remembered as:
+
+```text
+RECEIVE FROM LAMBDA
+        │
+        ▼
+      PUBLISH
+        │
+        ▼
+      DELIVER
+        │
+        ▼
+     NOTIFY HUMAN
+```
+
+The service does not:
+
+- Detect HTTPD failure.
+- Evaluate CloudWatch alarms.
+- Parse alarm events.
+- Decide P1 or P2.
+- Restart HTTPD.
+- Execute SSM commands.
+
+Those responsibilities belong to other layers of the architecture.
+
+---
+
+## 24. Final Summary
+
+Amazon SNS provides the **operational communication layer** of CloudOps NOC Automation V2.0.
+
+The correct current flow is:
+
+```text
+CloudWatch
+     │
+     ▼
+Lambda
+     │
+     ├────────────► SSM
+     │                │
+     │                ▼
+     │               EC2
+     │
+     ▼
+    SNS
+     │
+     ▼
+Operations Engineer
+```
+
+SNS is used to deliver:
+
+- P1 incident detection/recovery-in-progress notifications.
+- P1 successful recovery notifications.
+- P1 failed-recovery escalation notifications.
+- P2 diagnostic-in-progress notifications.
+- P2 final diagnostic reports requiring engineer review.
+
+---
+
+## Key Design Statement
+
+> **SNS does not trigger Lambda in the current V2.0 architecture. CloudWatch sends the alarm event directly to Lambda; Lambda processes the incident and then publishes the operational result to SNS for delivery to the engineer.**
