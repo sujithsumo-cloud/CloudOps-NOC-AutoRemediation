@@ -1,646 +1,666 @@
-# AWS Systems Manager (SSM)
+# AWS Lambda — Incident Decision and Orchestration
 
 ## Overview
 
-AWS Systems Manager (SSM) is the secure server-management service used in the CloudOps NOC Automation project.
+AWS Lambda is the **decision and orchestration layer** of the CloudOps NOC Automation V2.0 project.
 
-SSM provides the mechanism through which AWS Lambda remotely executes Linux commands on the Amazon EC2 instance without requiring direct SSH access.
+The current architecture uses a **direct CloudWatch Alarm → Lambda** event path. Lambda receives the alarm event, parses the alarm context, validates whether the event is actionable, identifies the incident type, and starts the appropriate P1 recovery or P2 diagnostic workflow.
 
-In this project, SSM is primarily responsible for **automated Apache HTTP Server (httpd) recovery**.
-
-When the existing CloudWatch alarm `NOC-cloudops-automate` detects that the Apache process is unavailable, the event reaches SNS and invokes the Lambda automation. Lambda then uses **Systems Manager Run Command** to execute the recovery command on the EC2 instance.
+Lambda does **not** directly log in to the EC2 instance and it does **not** directly restart Apache HTTPD. For EC2 operations, the Lambda function uses **Boto3**, the AWS SDK for Python, to call **AWS Systems Manager (SSM)** APIs.
 
 ---
 
-# 1. Purpose
+## 1. Role in the Project
 
-AWS Systems Manager is used to:
+Lambda is responsible for:
 
-- Manage the EC2 instance securely.
-- Execute Linux commands remotely.
-- Restart the Apache HTTP Server automatically.
-- Eliminate SSH dependency for automation.
-- Support event-driven remediation.
-- Return command execution results to Lambda.
-- Reduce manual NOC intervention.
-- Provide an auditable command-execution workflow.
+- Receiving direct CloudWatch Alarm events.
+- Parsing `event["alarmData"]`.
+- Validating that the alarm state is `ALARM`.
+- Applying the **Actionable Alarm Gate**.
+- Ignoring unknown or unsupported alarms.
+- Classifying incidents as P1 or P2.
+- Calling AWS Systems Manager through Boto3.
+- Coordinating P1 HTTPD recovery.
+- Coordinating P2 CPU diagnostics.
+- Verifying P1 recovery.
+- Performing a stability verification.
+- Applying the configured bounded retry behavior.
+- Publishing incident results and escalation notifications through Amazon SNS.
+
+In simple terms:
+
+> **CloudWatch detects. Lambda decides. SSM executes. SNS notifies.**
 
 ---
 
-# 2. Role in the Project
-
-SSM is the **execution layer** of the auto-remediation architecture.
-
-The overall P1 HTTPD workflow is:
+## 2. Lambda Architecture
 
 ```text
-Apache httpd
-     │
-     │ Process becomes unavailable
-     ▼
-CloudWatch Agent
-     │
-     ▼
-Amazon CloudWatch
-     │
-     ▼
-NOC-cloudops-automate
-     │
-     ▼
-Amazon SNS
-     │
-     ▼
+CloudWatch Alarm
+      │
+      ▼
+Direct Alarm Event
+      │
+      ▼
 AWS Lambda
-     │
-     ▼
-SSM Run Command
-     │
-     ▼
-SSM Agent
-     │
-     ▼
-EC2 Instance
-     │
-     ▼
-systemctl restart httpd
-     │
-     ▼
-Apache Recovered
+      │
+      ▼
+Parse event["alarmData"]
+      │
+      ▼
+Check Alarm State
+      │
+      ▼
+Actionable Alarm Gate
+      │
+      ▼
+Incident Classification
+      │
+   ┌──┴──┐
+   ▼     ▼
+  P1     P2
+   │      │
+   │      └──► SSM Diagnostics
+   │
+   └─────────► SSM Recovery
+                │
+                ▼
+               EC2
+                │
+                ▼
+        Verification / Stability
+                │
+                ▼
+               SNS
+                │
+                ▼
+        Operations Engineer
 ```
 
 ---
 
-# 3. SSM Components Used
+## 3. Direct CloudWatch Alarm Parsing
 
-| Component | Purpose |
-|---|---|
-| Systems Manager | Central management service |
-| Managed Node | EC2 instance registered with SSM |
-| Run Command | Executes Linux commands |
-| SSM Agent | Receives and executes commands on EC2 |
-| IAM Role | Authorizes EC2-to-SSM communication |
-| Lambda | Requests Run Command execution |
+The Lambda function expects the current direct CloudWatch Alarm event format and reads:
 
----
-
-# 4. Managed Node
-
-The EC2 instance is registered with Systems Manager as a managed node.
-
-| Property | Value |
-|---|---|
-| Instance Name | `cloudops-server` |
-| Platform | Amazon Linux 2023 |
-| Architecture | x86_64 |
-| SSM Status | Online |
-| SSM Agent | Installed and running |
-
-The managed node must remain online and communicate successfully with Systems Manager.
-
----
-
-# 5. SSM Agent
-
-The SSM Agent runs on the EC2 instance as a system service.
-
-Its responsibilities are:
-
-- Communicate with Systems Manager.
-- Receive Run Command instructions.
-- Execute commands locally.
-- Return command output.
-- Report command execution status.
-- Maintain secure communication with AWS.
-
-### Verify SSM Agent
-
-```bash
-sudo systemctl status amazon-ssm-agent
+```python
+event["alarmData"]
 ```
 
-### Start SSM Agent
+The parser extracts operational context such as:
 
-```bash
-sudo systemctl start amazon-ssm-agent
-```
+- Alarm name
+- Alarm state
+- Alarm reason
+- Timestamp
+- Alarm ARN
+- AWS account
+- AWS Region
 
-### Enable SSM Agent at Boot
-
-```bash
-sudo systemctl enable amazon-ssm-agent
-```
-
-### Restart SSM Agent
-
-```bash
-sudo systemctl restart amazon-ssm-agent
-```
-
----
-
-# 6. IAM Requirement
-
-The EC2 instance requires an IAM role that allows Systems Manager to manage the instance.
-
-The standard AWS managed policy used for the EC2 SSM role is:
+Conceptually:
 
 ```text
-AmazonSSMManagedInstanceCore
+Alarm Event
+    │
+    ▼
+event["alarmData"]
+    │
+    ▼
+Alarm Name
+State
+Reason
+Timestamp
 ```
 
-This allows the SSM Agent to communicate with Systems Manager using temporary credentials provided through the EC2 instance role.
+**Alarm parsing** answers:
 
-No AWS access key or secret access key is stored on the EC2 instance.
+> **What alarm event did Lambda receive?**
 
 ---
 
-# 7. Lambda Permission
+## 4. Actionable Alarm Gate
 
-The Lambda execution role requires permission to send commands to the target EC2 instance through Systems Manager.
+Not every incoming event is allowed to start automation.
 
-The project should use a restricted policy rather than unnecessarily granting full Systems Manager access.
+The Lambda function first verifies that the alarm state is:
 
-Example permission:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ssm:SendCommand",
-        "ssm:GetCommandInvocation"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
+```text
+ALARM
 ```
 
-For a production implementation, the policy should be further restricted to the specific SSM document and EC2 target where practical.
+It then checks whether the alarm name exists in the approved alarm configuration.
+
+Current actionable alarms are:
+
+| Alarm | Priority | Metric | Action |
+|---|---|---|---|
+| `NOC-cloudops-automate` | P1 | `procstat_lookup_pid_count` | HTTPD recovery |
+| `cpu alert` | P2 | `CPUUtilization` | CPU diagnosis |
+
+Conceptually:
+
+```text
+Parsed Alarm
+     │
+     ▼
+State = ALARM?
+   /        \
+ NO         YES
+ │           │
+ ▼           ▼
+Ignore    Known Alarm?
+           /      \
+         NO        YES
+         │          │
+         ▼          ▼
+       Ignore     Continue
+```
+
+The Actionable Alarm Gate is an **automation safety control** that prevents unknown or unsupported alarms from starting operational actions.
 
 ---
 
-# 8. Run Command
+## 5. P1 — HTTPD Failure
 
-The project uses Systems Manager **Run Command** to execute the Apache recovery operation.
+### Detection
 
-Primary command:
+P1 uses:
+
+```text
+Alarm  : NOC-cloudops-automate
+Metric : procstat_lookup_pid_count
+Rule   : < 1
+```
+
+The metric represents the number of matching HTTPD processes reported through the CloudWatch Agent procstat monitoring configuration.
+
+When the configured alarm condition becomes actionable, Lambda identifies the event as:
+
+```text
+P1 - Critical
+Apache HTTP Server (httpd)
+Action Type: Recovery
+```
+
+### Recovery command
+
+The configured recovery action is:
 
 ```bash
 systemctl restart httpd
 ```
 
-The command can be executed manually from the Systems Manager console for testing or automatically through Lambda during an incident.
-
----
-
-# 9. Apache Recovery Procedure
-
-The automated remediation performs the following logical operations:
-
-### Step 1 – Check Apache
+The configured verification command is:
 
 ```bash
 systemctl is-active httpd
 ```
 
-### Step 2 – Restart Apache
-
-```bash
-systemctl restart httpd
-```
-
-### Step 3 – Verify Apache
-
-```bash
-systemctl is-active httpd
-```
-
-Expected result:
+### P1 execution path
 
 ```text
-active
-```
-
-This verification allows the automation workflow to determine whether the remediation succeeded.
-
----
-
-# 10. End-to-End SSM Automation
-
-When the P1 HTTPD alarm is triggered:
-
-```text
-1. Apache becomes unavailable
-        ↓
-2. CloudWatch detects Process Count = 0
-        ↓
-3. NOC-cloudops-automate enters ALARM
-        ↓
-4. CloudWatch publishes to SNS
-        ↓
-5. SNS invokes Lambda
-        ↓
-6. Lambda identifies the EC2 instance
-        ↓
-7. Lambda calls ssm:SendCommand
-        ↓
-8. Systems Manager receives command
-        ↓
-9. SSM Agent receives command
-        ↓
-10. SSM Agent executes systemctl restart httpd
-        ↓
-11. Apache becomes active
-        ↓
-12. Lambda checks execution result
-        ↓
-13. Recovery notification is generated
-```
-
----
-
-# 11. Why SSM Is Used Instead of SSH
-
-The project uses SSM for automated server management rather than making Lambda connect to the EC2 instance through SSH.
-
-### SSH-based approach
-
-```text
+P1 Alarm
+   │
+   ▼
 Lambda
-   ↓
-SSH
-   ↓
-Port 22
-   ↓
-EC2
-```
-
-This requires additional SSH configuration, key management, network access, and credential handling.
-
-### SSM-based approach
-
-```text
-Lambda
-   ↓
+   │
+   ▼
+Boto3
+   │
+   ▼
+SSM SendCommand API
+   │
+   ▼
 AWS Systems Manager
-   ↓
+   │
+   ▼
 SSM Agent
-   ↓
-EC2
-```
-
-Advantages include:
-
-- No SSH key required for automation.
-- No Lambda-to-EC2 SSH connection required.
-- No requirement to expose port 22 for the remediation workflow.
-- IAM-based authorization.
-- Centralized command execution.
-- Command execution status.
-- Better auditing and operational control.
-
----
-
-# 12. Network Requirements
-
-SSM Agent must be able to communicate with AWS Systems Manager endpoints.
-
-In the current project architecture, the EC2 instance is deployed in a public subnet with internet connectivity.
-
-The instance therefore requires appropriate outbound connectivity for AWS service communication.
-
-For a future private-subnet architecture, VPC endpoints for Systems Manager-related services can be considered.
-
----
-
-# 13. SSM Verification Commands
-
-### Check Agent Status
-
-```bash
-sudo systemctl status amazon-ssm-agent
-```
-
-### Check Agent Version
-
-```bash
-amazon-ssm-agent -version
-```
-
-### Check SSM Logs
-
-```bash
-sudo ls -lah /var/log/amazon/ssm/
-```
-
-### View Recent SSM Log Entries
-
-```bash
-sudo tail -f /var/log/amazon/ssm/amazon-ssm-agent.log
-```
-
-### Verify Apache
-
-```bash
-sudo systemctl status httpd
-```
-
----
-
-# 14. Manual Run Command Test
-
-Before depending on Lambda automation, the SSM workflow should be tested independently.
-
-From the AWS Systems Manager console:
-
-```text
-Systems Manager
-      ↓
-Run Command
-      ↓
-AWS-RunShellScript
-      ↓
-Select EC2 managed node
-      ↓
-Enter command
-      ↓
+   │
+   ▼
+EC2 Linux
+   │
+   ▼
 systemctl restart httpd
-      ↓
-Run
+   │
+   ▼
+systemd
+   │
+   ▼
+Apache HTTPD
 ```
 
-Then verify:
+Lambda **requests and coordinates** the recovery.
+
+Systems Manager provides the controlled command-execution path.
+
+Linux `systemd` ultimately manages the HTTPD service.
+
+---
+
+## 6. P1 Verification
+
+A successful command submission does not automatically prove that HTTPD recovered.
+
+After remediation, the automation checks:
 
 ```bash
 systemctl is-active httpd
 ```
 
-Expected result:
+Expected successful output:
 
 ```text
 active
 ```
 
-This confirms that the SSM layer is working before troubleshooting Lambda.
+Verification answers:
+
+> **Did HTTPD recover immediately after the remediation action?**
 
 ---
 
-# 15. Troubleshooting
+## 7. Stability Verification
 
-## Problem: EC2 Not Showing as Managed Node
+Immediate recovery can be temporary.
 
-Check:
-
-```bash
-sudo systemctl status amazon-ssm-agent
-```
-
-Then verify:
-
-- EC2 IAM role is attached.
-- `AmazonSSMManagedInstanceCore` is available.
-- SSM Agent is running.
-- EC2 has outbound connectivity.
-- Instance is running.
-
----
-
-## Problem: SSM Agent Is Offline
-
-Restart the agent:
-
-```bash
-sudo systemctl restart amazon-ssm-agent
-```
-
-Then check:
-
-```bash
-sudo systemctl status amazon-ssm-agent
-```
-
----
-
-## Problem: Run Command Fails
-
-Check:
-
-- Managed node status.
-- IAM permissions.
-- Command syntax.
-- SSM Agent status.
-- SSM Agent logs.
-- EC2 connectivity.
-
----
-
-## Problem: Apache Does Not Restart
-
-Check Apache directly:
-
-```bash
-sudo systemctl status httpd
-```
-
-Check configuration:
-
-```bash
-sudo apachectl configtest
-```
-
-Try manually:
-
-```bash
-sudo systemctl restart httpd
-```
-
-Check logs:
-
-```bash
-sudo journalctl -u httpd --no-pager -n 50
-```
-
----
-
-# 16. Logging
-
-SSM Agent logs are stored on the EC2 instance.
-
-Primary directory:
+For example:
 
 ```text
-/var/log/amazon/ssm/
+Restart
+   ↓
+HTTPD active
+   ↓
+Short time passes
+   ↓
+HTTPD fails again
 ```
 
-These logs can help identify:
+To avoid reporting a temporary recovery as a successful resolution, the current P1 workflow performs a second service-status check after a **15-second stability interval**.
 
-- Agent startup problems.
-- Connectivity problems.
-- Command execution issues.
-- Authentication problems.
-- Agent communication failures.
-
-Lambda execution logs are separately available through Amazon CloudWatch Logs.
-
----
-
-# 17. Security Best Practices
-
-The SSM implementation follows these practices:
-
-- Use IAM roles instead of static credentials.
-- Keep SSM Agent updated.
-- Use least-privilege Lambda permissions.
-- Avoid unnecessary SSH access.
-- Restrict Run Command permissions.
-- Monitor command execution.
-- Review SSM logs during incidents.
-- Test remediation commands before automation.
-- Do not place AWS credentials inside shell scripts.
-
----
-
-# 18. Repository Structure
-
-Recommended SSM project files:
+Conceptually:
 
 ```text
-ssm/
-├── README.md
-├── commands/
-│   ├── restart-httpd.sh
-│   ├── check-httpd.sh
-│   └── verify-httpd.sh
-│
-├── documents/
-│   └── restart-httpd-document.json
-│
-├── policies/
-│   └── lambda-ssm-policy.json
-│
-├── scripts/
-│   ├── install-ssm-agent.sh
-│   └── verify-ssm-agent.sh
-│
-├── troubleshooting/
-│   └── ssm-troubleshooting.md
-│
-└── screenshots/
-    ├── managed-node.png
-    ├── run-command.png
-    └── command-result.png
+HTTPD Restart
+      │
+      ▼
+Immediate Verification
+      │
+      ▼
+Active
+      │
+      ▼
+Wait 15 Seconds
+      │
+      ▼
+Stability Verification
+      │
+      ▼
+Still Active?
 ```
+
+The stability verification answers:
+
+> **Did the recovered service remain healthy after the initial recovery?**
 
 ---
 
-# 19. Example Recovery Script
+## 8. Bounded Retry and Escalation
 
-The basic Apache recovery script can be maintained in the repository:
+The P1 workflow uses a **bounded retry** rather than an unlimited recovery loop.
+
+If the initial recovery attempt fails, the automation allows the configured retry attempt.
+
+Conceptually:
+
+```text
+Initial Recovery
+      │
+      ▼
+Successful?
+   /       \
+ YES        NO
+  │          │
+  │       Retry
+  │          │
+  │          ▼
+  │      Successful?
+  │       /       \
+  │      YES       NO
+  │       │         │
+  ▼       ▼         ▼
+Resolved         Escalation
+```
+
+If the service cannot be confirmed active and stable after the allowed recovery attempts, the incident is escalated for manual investigation.
+
+This prevents uncontrolled automation loops.
+
+---
+
+## 9. P2 — High CPU Diagnosis
+
+P2 uses:
+
+```text
+Alarm  : cpu alert
+Metric : CPUUtilization
+Rule   : > 50%
+```
+
+P2 is **diagnostic-only**.
+
+The Lambda function does not automatically restart HTTPD or the EC2 instance for a high-CPU condition.
+
+The configured diagnostic commands collect evidence such as:
 
 ```bash
-#!/bin/bash
-
-echo "Checking Apache service..."
-
-if systemctl is-active --quiet httpd; then
-    echo "Apache is already running."
-    exit 0
-fi
-
-echo "Apache is not running."
-echo "Attempting Apache restart..."
-
-systemctl restart httpd
-
-if systemctl is-active --quiet httpd; then
-    echo "Apache restart successful."
-    exit 0
-else
-    echo "Apache restart failed."
-    systemctl status httpd --no-pager
-    exit 1
-fi
+uptime
+ps aux --sort=-%cpu | head -11
+free -h
 ```
 
-This script can be executed through Systems Manager Run Command.
-
----
-
-# 20. Operational Role
-
-Within the finalized CloudOps NOC architecture, SSM is responsible for the **execution of remediation**, not for detecting the incident.
-
-| Layer | Service | Responsibility |
-|---|---|---|
-| Detection | CloudWatch | Detect Apache failure |
-| Event Distribution | SNS | Distribute alarm event |
-| Automation | Lambda | Start remediation |
-| Execution | SSM | Execute Linux command |
-| Target | EC2 | Run Apache |
-| Recovery | httpd | Return to active state |
-
-This separation of responsibilities makes the automation workflow easier to troubleshoot and maintain.
-
----
-
-# 21. Benefits
-
-The SSM implementation provides:
-
-- Secure remote command execution.
-- Automated Apache recovery.
-- Reduced dependency on SSH.
-- IAM-based authentication.
-- Centralized management.
-- Command execution visibility.
-- Faster incident recovery.
-- Reduced manual NOC effort.
-
----
-
-# 22. Project Scope
-
-For the current CloudOps NOC project, Systems Manager is used primarily for:
-
-**P1 – HTTPD Auto-Remediation**
-
-The remediation action is:
+The diagnostic workflow is:
 
 ```text
-systemctl restart httpd
+cpu alert
+    │
+    ▼
+Lambda
+    │
+    ▼
+P2 Identified
+    │
+    ▼
+SSM Diagnostics
+    │
+    ▼
+CPU / Load / Process / Memory Evidence
+    │
+    ▼
+SNS
+    │
+    ▼
+Operations Engineer
 ```
 
-The finalized project scope contains **P1 HTTPD automation and P2 CPU utilization automation**. SSM can support both workflows, while the actual command executed depends on the automation logic associated with each severity.
+### Why P2 is diagnostic-only
+
+High CPU utilization is a **symptom with multiple possible root causes**.
+
+Examples include:
+
+- Legitimate user traffic
+- Application workload
+- Background processes
+- Misbehaving processes
+- Resource pressure
+
+For this reason:
+
+> **Detection does not automatically mean remediation.**
+
+P2 keeps human judgment in the operational decision loop.
 
 ---
 
-# 23. Summary
+## 10. Boto3 and AWS APIs
 
-AWS Systems Manager provides the secure execution layer of the CloudOps NOC Auto-Remediation System.
+The Lambda function is written in Python and creates AWS clients with Boto3.
 
-CloudWatch detects the incident, SNS distributes the event, Lambda controls the automation workflow, and Systems Manager securely executes the required command on EC2.
+Conceptually:
 
-For the P1 HTTPD workflow:
+```text
+Lambda Python Code
+        │
+        ▼
+      Boto3
+        │
+        ▼
+     AWS API
+        │
+   ┌────┼────┐
+   ▼    ▼    ▼
+  SSM  SNS   EC2
+```
+
+Boto3 is used to interact programmatically with AWS services.
+
+Examples include:
+
+- Calling Systems Manager Run Command.
+- Reading command execution results.
+- Publishing SNS notifications.
+- Reading EC2 instance details.
+
+Lambda does not need to open an AWS console or manually connect to the instance. It communicates through AWS APIs.
+
+---
+
+## 11. Systems Manager Integration
+
+The Lambda function uses Systems Manager Run Command with the AWS-managed document:
+
+```text
+AWS-RunShellScript
+```
+
+Conceptually:
+
+```text
+Lambda
+   │
+   ▼
+Boto3
+   │
+   ▼
+ssm:SendCommand
+   │
+   ▼
+Systems Manager
+   │
+   ▼
+SSM Agent
+   │
+   ▼
+Linux Shell
+```
+
+The SSM layer separates the **automation decision** from the **server-side command execution**.
+
+This is an important design principle:
+
+```text
+Lambda
+= Decision / Orchestration
+
+SSM
+= Controlled Execution
+
+systemd
+= Linux Service Management
+```
+
+---
+
+## 12. SNS Integration
+
+SNS is used after incident processing to deliver operational notifications.
+
+The current V2.0 architecture is:
 
 ```text
 CloudWatch
-    ↓
-SNS
-    ↓
+     │
+     ▼
 Lambda
-    ↓
-SSM Run Command
-    ↓
-SSM Agent
-    ↓
-EC2
-    ↓
-systemctl restart httpd
-    ↓
-Apache Recovered
+     │
+     ▼
+Incident Processing
+     │
+     ▼
+SNS
+     │
+     ▼
+Subscriber / Engineer
 ```
 
-This architecture provides a practical, secure, and automated approach to server remediation while reducing manual intervention and improving recovery time.
+SNS is **not** the trigger between CloudWatch and Lambda in the current design.
+
+Lambda publishes incident results to SNS for scenarios such as:
+
+- Successful recovery
+- Recovery failure
+- Escalation
+- P2 diagnostic results
+
+SNS is the **notification transport**.
+
+Escalation is the **operational decision to involve a human engineer**.
+
+---
+
+## 13. IAM and Least Privilege
+
+Lambda uses an execution role.
+
+The execution role should contain only the permissions required for the project workflow.
+
+Required capabilities include access to the relevant:
+
+- Systems Manager operations
+- SNS publishing
+- EC2 read operations
+- Lambda logging
+
+The project follows the **Principle of Least Privilege**:
+
+> Give an identity only the minimum permissions required to perform its responsibility.
+
+Lambda should not receive broad administrator permissions when narrower permissions are sufficient.
+
+---
+
+## 14. P1 vs P2 Decision Model
+
+| Characteristic | P1 — HTTPD | P2 — CPU |
+|---|---|---|
+| Alarm | `NOC-cloudops-automate` | `cpu alert` |
+| Metric | `procstat_lookup_pid_count` | `CPUUtilization` |
+| Priority | P1 | P2 |
+| Action Type | Recovery | Diagnosis |
+| Automatic corrective action | Yes | No |
+| SSM usage | Restart + verify | Collect diagnostics |
+| Human involvement | On escalation | Required for final decision |
+
+The core operational principle is:
+
+> **Monitoring, diagnosis, and remediation are separate decisions.**
+
+---
+
+## 15. Failure Handling
+
+The Lambda workflow is designed to handle failures safely.
+
+Examples include:
+
+- Invalid event format
+- Alarm state other than `ALARM`
+- Unknown alarm name
+- SSM command failure
+- SSM invocation timeout
+- HTTPD verification failure
+- Stability verification failure
+
+Unknown alarms are ignored rather than triggering uncontrolled actions.
+
+Failed P1 recovery is escalated instead of retrying indefinitely.
+
+---
+
+## 16. Operational Responsibility Model
+
+| Layer | Component | Responsibility |
+|---|---|---|
+| Network | VPC | Network foundation |
+| Workload | EC2 / HTTPD | Run the web workload |
+| Monitoring | CloudWatch | Detect incident conditions |
+| Decision | Lambda | Parse, validate, classify, orchestrate |
+| Execution | Systems Manager | Execute controlled EC2 operations |
+| Linux service control | systemd | Start/restart/manage HTTPD |
+| Notification | SNS | Deliver incident notifications |
+| Authorization | IAM | Control AWS permissions |
+
+---
+
+## 17. Three-Level Interview Answer
+
+### Level 1
+
+> **Lambda is the decision and orchestration layer of the project.**
+
+### Level 2
+
+> **Lambda receives the direct CloudWatch alarm event, parses and validates it, applies the actionable-alarm gate, identifies P1 or P2, and starts the appropriate remediation or diagnostic workflow.**
+
+### Level 3
+
+> **The Lambda Python function reads `event["alarmData"]` and validates that the event is in the `ALARM` state and belongs to the approved alarm configuration. For P1, it uses Boto3 to call the SSM SendCommand API, coordinates HTTPD restart verification and stability checking, and publishes the result through SNS. For P2, it uses SSM to collect diagnostic evidence rather than automatically restarting the workload.**
+
+---
+
+## 18. Summary
+
+AWS Lambda is the **decision and orchestration layer** of CloudOps NOC Automation V2.0.
+
+The Lambda workflow can be summarized as:
+
+```text
+Receive
+   │
+   ▼
+Parse
+   │
+   ▼
+Validate
+   │
+   ▼
+Classify
+   │
+   ▼
+Orchestrate
+   │
+   ▼
+Verify
+   │
+   ▼
+Notify / Escalate
+```
+
+End-to-end:
+
+```text
+CloudWatch Detects
+        │
+        ▼
+Lambda Decides
+        │
+        ▼
+SSM Executes
+        │
+        ▼
+EC2 / Linux Runs
+        │
+        ▼
+Lambda Verifies
+        │
+        ▼
+SNS Notifies
+```
+
+---
+
+## Key Design Statement
+
+> **Lambda does not directly restart HTTPD. Lambda decides and requests the approved recovery action through Systems Manager; Systems Manager delivers the command to the EC2 instance, and Linux systemd performs the actual HTTPD service restart.**
