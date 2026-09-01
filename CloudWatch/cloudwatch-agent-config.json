@@ -3,95 +3,34 @@
     "metrics_collection_interval": 60,
     "run_as_user": "root"
   },
-
   "metrics": {
-
     "namespace": "CWAgent",
-
-    "append_dimensions": {
-      "InstanceId": "${aws:InstanceId}"
-    },
-
     "metrics_collected": {
-
       "cpu": {
         "measurement": [
           "cpu_usage_idle",
           "cpu_usage_user",
           "cpu_usage_system"
         ],
-        "totalcpu": true
-      },
-
-      "mem": {
-        "measurement": [
-          "mem_used_percent"
-        ]
-      },
-
-      "disk": {
-        "measurement": [
-          "used_percent"
-        ],
+        "totalcpu": true,
         "resources": [
           "*"
         ]
       },
-
-      "net": {
-        "measurement": [
-          "bytes_sent",
-          "bytes_recv"
-        ],
-        "resources": [
-          "ens5"
-        ]
-      },
-
       "procstat": [
         {
-          "pattern": "httpd",
+          "exe": "httpd",
           "measurement": [
             "pid_count"
-          ]
+          ],
+          "metrics_collection_interval": 60
         }
       ]
-    }
-  },
-
-  "logs": {
-    "logs_collected": {
-
-      "files": {
-
-        "collect_list": [
-
-          {
-            "file_path": "/var/log/httpd/access_log",
-            "log_group_name": "/aws/ec2/httpd/access",
-            "log_stream_name": "{instance_id}"
-          },
-
-          {
-            "file_path": "/var/log/httpd/error_log",
-            "log_group_name": "/aws/ec2/httpd/error",
-            "log_stream_name": "{instance_id}"
-          },
-
-          {
-            "file_path": "/var/log/messages",
-            "log_group_name": "/aws/ec2/messages",
-            "log_stream_name": "{instance_id}"
-          },
-
-          {
-            "file_path": "/var/log/secure",
-            "log_group_name": "/aws/ec2/secure",
-            "log_stream_name": "{instance_id}"
-          }
-
-        ]
-      }
+    },
+    "append_dimensions": {
+      "ImageId": "${aws:ImageId}",
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}"
     }
   }
 }
