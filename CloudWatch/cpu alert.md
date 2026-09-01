@@ -1,337 +1,576 @@
-# CloudWatch CPU Utilization Alarm — P2 High
+# P2 CloudWatch Alarm — `cpu alert`
 
 ## Overview
 
-The CPU Utilization CloudWatch Alarm is the **P2 – High severity** monitoring and automation component of the CloudOps NOC Automation project.
+`cpu alert` is the **P2 — High CPU utilization alarm** in the CloudOps NOC Automation V2.0 project.
 
-Its purpose is to detect sustained high CPU utilization on the Amazon EC2 instance and initiate the project's automated incident-response workflow.
+Its purpose is to detect high CPU utilization on the EC2 instance and start a **diagnostic-only incident workflow**.
 
-The alarm monitors the standard EC2 `CPUUtilization` metric provided by Amazon CloudWatch. When CPU utilization satisfies the configured threshold and evaluation criteria, the alarm changes to the **ALARM** state and publishes an event to the project's Amazon SNS topic.
+P2 does **not** automatically restart HTTPD or reboot the EC2 instance.
 
-The SNS event invokes the AWS Lambda automation function, which uses AWS Systems Manager Run Command to perform the configured CPU remediation action on the affected EC2 instance.
-
----
-
-# 1. Severity
-
-| Property | Configuration |
-| --- | --- |
-| Severity | **P2 – High** |
-| Service | Amazon EC2 |
-| Failure Type | High CPU utilization |
-| Monitoring Service | Amazon CloudWatch |
-| Metric Source | Amazon EC2 |
-| Notification | Amazon SNS |
-| Automation | AWS Lambda |
-| Remediation | AWS Systems Manager Run Command |
-| Target | Amazon EC2 |
-
-P2 represents the **high-severity infrastructure performance condition** in this project.
-
-> **P3 is not part of this project scope.**
-
----
-
-# 2. Purpose
-
-The CPU alarm is designed to:
-
-- Detect high CPU utilization on the EC2 instance.
-- Generate a P2 high-severity incident condition.
-- Notify the NOC administrator.
-- Trigger the automated remediation workflow.
-- Execute the configured SSM remediation command.
-- Reduce prolonged CPU-related service impact.
-- Allow CloudWatch to monitor the recovery state.
-
----
-
-# 3. Monitoring Architecture
+The current P2 flow is:
 
 ```text
 Amazon EC2
     │
-    │ CPU Utilization
+    ▼
+CPUUtilization
+    │
     ▼
 Amazon CloudWatch
     │
-    │ Alarm Evaluation
     ▼
-P2 CPU Alarm
+cpu alert
     │
-    │ ALARM State
     ▼
-Amazon SNS
+ALARM
     │
-    ├──────────────► Email Notification
+    ▼
+Direct Alarm Event
     │
     ▼
 AWS Lambda
     │
     ▼
+P2 Classification
+    │
+    ▼
 AWS Systems Manager
     │
     ▼
-SSM Agent
+CPU Diagnostics
     │
     ▼
+Amazon SNS
+    │
+    ▼
+Operations Engineer
+```
+
+The current V2.0 architecture does **not** use SNS between CloudWatch and Lambda.
+
+---
+
+## 1. Alarm Role
+
+| Property | Current Project Value |
+|---|---|
+| Alarm Name | `cpu alert` |
+| Priority | P2 |
+| Severity | P2 — High |
+| Service | EC2 CPU Utilization |
+| Metric Source | Native EC2 metric |
+| Namespace | `AWS/EC2` |
+| Metric | `CPUUtilization` |
+| Project Threshold Label | `> 50%` |
+| Detection Service | Amazon CloudWatch |
+| Decision Layer | AWS Lambda |
+| Diagnostic Layer | AWS Systems Manager |
+| Notification Layer | Amazon SNS |
+| Automatic Recovery | No |
+| Manual Review | Required |
+
+The P2 alarm is responsible for **detecting a high-CPU condition**.
+
+It does not perform remediation itself.
+
+---
+
+## 2. Why P2 Uses a Native EC2 Metric
+
+Unlike the P1 HTTPD process alarm, P2 does not require the CloudWatch Agent for its primary detection metric.
+
+Amazon EC2 already publishes:
+
+```text
+AWS/EC2
+CPUUtilization
+```
+
+to CloudWatch.
+
+Therefore the P2 monitoring path is:
+
+```text
 EC2
-    │
-    ▼
-Configured CPU Remediation
+ │
+ ▼
+CPUUtilization
+ │
+ ▼
+CloudWatch
+ │
+ ▼
+cpu alert
+```
+
+This is different from P1:
+
+```text
+P1
+HTTPD → CloudWatch Agent → procstat → CloudWatch
+
+P2
+EC2 → CPUUtilization → CloudWatch
 ```
 
 ---
 
-# 4. Alarm Condition
+## 3. Normal CPU State
 
-The alarm evaluates the standard EC2 CPU utilization metric:
-
-```text
-Namespace: AWS/EC2
-Metric: CPUUtilization
-```
-
-When CPU utilization remains below the configured alarm threshold:
+When CPU utilization does not satisfy the configured alarm condition:
 
 ```text
 EC2 CPU
    │
    ▼
-Normal CPU Utilization
+CPUUtilization
    │
    ▼
-CloudWatch Metric
+Below Alarm Condition
    │
    ▼
-Alarm = OK
+cpu alert = OK
 ```
 
-When CPU utilization reaches or exceeds the configured threshold:
+No P2 diagnostic workflow is started.
+
+---
+
+## 4. High CPU State
+
+When the configured high-CPU condition is satisfied:
 
 ```text
-High CPU Utilization
+EC2 CPU Increases
+       │
+       ▼
+CPUUtilization
+       │
+       ▼
+Configured Threshold Condition Met
+       │
+       ▼
+cpu alert = ALARM
+```
+
+This is the **detection stage**.
+
+The current Lambda configuration identifies the P2 threshold label as:
+
+```text
+> 50%
+```
+
+The exact CloudWatch statistic, period, evaluation count, and missing-data behavior should remain synchronized with the deployed CloudWatch alarm configuration.
+
+---
+
+## 5. Correct V2.0 Event Flow
+
+When `cpu alert` becomes actionable, CloudWatch sends the alarm event **directly to Lambda**.
+
+Correct:
+
+```text
+CloudWatch
+   │
+   ▼
+Lambda
+```
+
+Not:
+
+```text
+CloudWatch
+   │
+   ▼
+SNS
+   │
+   ▼
+Lambda
+```
+
+SNS is used later, after Lambda has processed the P2 incident.
+
+---
+
+## 6. Lambda Parsing and Classification
+
+Lambda receives the direct CloudWatch Alarm event and parses:
+
+```python
+event["alarmData"]
+```
+
+It validates the alarm state and alarm identity through the Actionable Alarm Gate.
+
+For P2:
+
+```text
+Alarm Name = cpu alert
+State      = ALARM
         │
         ▼
-CloudWatch CPUUtilization
-        │
-        ▼
-Threshold Condition Satisfied
-        │
-        ▼
-P2 Alarm = ALARM
+Approved Alarm?
+      /     \
+    YES      NO
+     │        │
+     ▼        ▼
+    P2      Ignore
 ```
 
-The exact threshold, period, evaluation periods, statistic, dimensions, and alarm actions must match the configuration deployed in the AWS environment.
+The current Lambda configuration defines:
+
+```text
+Priority    : P2
+Severity    : P2 - High
+Action Type : diagnosis
+Metric      : CPUUtilization
+Threshold   : > 50%
+```
+
+This is important:
+
+> **P2 is classified as diagnosis, not recovery.**
 
 ---
 
-# 5. Alarm Configuration
+## 7. Why P2 Is Diagnostic-Only
 
-The following values describe the project configuration. Keep the numerical values synchronized with the actual CloudWatch console configuration.
+High CPU utilization is a **symptom**, not a single known root cause.
 
-| Property | Value |
-| --- | --- |
-| Alarm Purpose | Detect high EC2 CPU utilization |
-| Severity | **P2 – High** |
-| Namespace | `AWS/EC2` |
-| Metric | `CPUUtilization` |
-| Statistic | Configured CloudWatch statistic |
-| Threshold | Configured CPU percentage |
-| Period | Configured evaluation period |
-| Evaluation Periods | Configured evaluation count |
-| Alarm Action | Amazon SNS |
-| Notification | NOC administrator |
-| Automation | AWS Lambda |
-| Remediation | AWS Systems Manager Run Command |
-| Target | Project EC2 instance |
+Possible causes include:
 
-> Do not document a threshold such as 80% or 90% as the deployed value unless that exact value is present in the AWS environment.
+- Legitimate customer traffic.
+- Application workload.
+- Background jobs.
+- A CPU-heavy Linux process.
+- Resource pressure.
+- Unexpected software behavior.
+
+A blind restart could interrupt a healthy workload or hide the real cause.
+
+For example:
+
+```text
+Marketing Campaign
+       │
+       ▼
+Many Real Users
+       │
+       ▼
+CPU High
+```
+
+Automatically restarting HTTPD in that situation could make the service worse.
+
+Therefore:
+
+> **Detection does not automatically mean remediation.**
+
+P2 uses a **human-in-the-loop** operational model.
 
 ---
 
-# 6. Normal State
+## 8. P2 Diagnostic Commands
 
-When CPU utilization is below the configured alarm threshold:
+After Lambda classifies the alarm as P2, it uses Systems Manager Run Command to collect diagnostic evidence.
 
-```text
-EC2
- │
- ▼
-CPU Utilization
- │
- ▼
-Below Alarm Threshold
- │
- ▼
-CloudWatch Alarm
- │
- ▼
-OK
+The current Lambda code uses commands equivalent to:
+
+```bash
+uptime
+ps aux --sort=-%cpu | head -11
+free -h
 ```
 
-No remediation action is required.
+These provide:
+
+| Command | Purpose |
+|---|---|
+| `uptime` | Shows uptime and system load averages |
+| `ps aux --sort=-%cpu | head -11` | Shows the highest CPU-consuming processes |
+| `free -h` | Shows memory usage |
+
+The current Lambda code also adds section labels to make the captured output easier to read.
 
 ---
 
-# 7. High CPU State
-
-When CPU utilization satisfies the configured alarm condition:
+## 9. P2 SSM Diagnostic Flow
 
 ```text
-EC2
- │
- ▼
-High CPU Utilization
- │
- ▼
-CloudWatch CPU Metric
- │
- ▼
-Threshold Condition Satisfied
- │
- ▼
-P2 Alarm = ALARM
+cpu alert
+   │
+   ▼
+Lambda
+   │
+   ▼
+Boto3
+   │
+   ▼
+SSM SendCommand API
+   │
+   ▼
+AWS Systems Manager
+   │
+   ▼
+SSM Agent
+   │
+   ▼
+EC2 Linux
+   │
+   ├── uptime
+   ├── top CPU consumers
+   └── memory status
 ```
 
-The alarm action then publishes the event to Amazon SNS.
+Systems Manager returns the command result and standard output to Lambda.
+
+Lambda then includes that evidence in the P2 diagnostic notification.
 
 ---
 
-# 8. Automated Remediation Workflow
+## 10. No Automatic CPU Fix
 
-After the P2 CPU alarm enters the ALARM state:
-
-### Step 1 – Detection
-
-Amazon CloudWatch detects that the configured CPU utilization condition has been satisfied.
-
-### Step 2 – Alarm
-
-The CPU alarm changes from:
+The current P2 policy explicitly does **not** perform:
 
 ```text
-OK
+HTTPD restart
+EC2 reboot
+Process kill
+Destructive remediation
 ```
 
-to:
+The implemented workflow is:
 
 ```text
+DETECTED
+   │
+   ▼
+DIAGNOSING
+   │
+   ▼
+DIAGNOSED
+   │
+   ▼
+ESCALATED / HANDED TO ENGINEER
+```
+
+The current Lambda output states that no automatic fix is applied for CPU and that manual review is required.
+
+---
+
+## 11. Diagnostic Result
+
+After SSM completes the diagnostic command, Lambda reads:
+
+```text
+SSM Command ID
+SSM Result Status
+Standard Output
+```
+
+Conceptually:
+
+```text
+SSM Diagnostics
+      │
+      ▼
+Command Result
+      │
+      ▼
+Lambda
+      │
+      ▼
+Diagnostic Report
+```
+
+If no diagnostic output is captured, the workflow indicates that the SSM Run Command history should be checked.
+
+---
+
+## 12. SNS Notification
+
+After diagnosis, Lambda publishes the P2 result to SNS.
+
+Correct notification path:
+
+```text
+Lambda
+   │
+   ▼
+SNS
+   │
+   ▼
+Engineer
+```
+
+The current Lambda workflow sends:
+
+### Initial notification
+
+```text
+High CPU Detected
+Diagnostics In Progress
+```
+
+### Final notification
+
+```text
+CPU Diagnostic Report
+Review Required
+```
+
+The final message communicates that:
+
+```text
+Diagnosis complete
+No automatic fix applied
+Manual review required
+```
+
+SNS delivers the message.
+
+Lambda decides the P2 outcome.
+
+---
+
+## 13. P2 Operational Example
+
+Imagine the EC2 instance reaches high CPU utilization.
+
+CloudWatch detects:
+
+```text
+CPUUtilization > configured threshold
+```
+
+Then:
+
+```text
+cpu alert
+   │
+   ▼
 ALARM
+   │
+   ▼
+Lambda
+   │
+   ▼
+P2 Diagnosis
 ```
 
-### Step 3 – SNS Notification
-
-CloudWatch publishes the alarm event to the configured SNS topic.
-
-### Step 4 – Lambda Invocation
-
-SNS invokes the project's Lambda automation function:
+SSM runs:
 
 ```text
-Cloudops-NOC-automate
+uptime
+ps aux --sort=-%cpu | head -11
+free -h
 ```
 
-### Step 5 – SSM Command
-
-Lambda calls AWS Systems Manager Run Command.
-
-### Step 6 – CPU Remediation
-
-SSM Agent executes the configured Linux remediation command on the EC2 instance.
-
-The exact command must match the remediation implemented in the deployed Lambda/SSM configuration.
-
-### Step 7 – Verification
-
-The automation checks whether the remediation command completed successfully and, where configured, verifies that the affected condition has recovered.
-
-### Step 8 – Monitoring Recovery
-
-CloudWatch continues evaluating `CPUUtilization`.
-
-If CPU utilization returns below the configured threshold for the required evaluation period, the alarm can return to:
+Suppose the result shows:
 
 ```text
-OK
+httpd            20%
+background-job   65%
 ```
+
+The automation does not automatically restart HTTPD because the diagnostic evidence suggests another process may be the main CPU consumer.
+
+Instead:
+
+```text
+Diagnostic Evidence
+       │
+       ▼
+SNS
+       │
+       ▼
+Engineer Review
+```
+
+This is the intended P2 behavior.
 
 ---
 
-# 9. CPU Failure Simulation
+## 14. P1 vs P2
 
-For testing, CPU load should be generated in a controlled manner and only for the duration required to validate the alarm.
+| Characteristic | P1 — HTTPD | P2 — CPU |
+|---|---|---|
+| Alarm | `NOC-cloudops-automate` | `cpu alert` |
+| Metric | `procstat_lookup_pid_count` | `CPUUtilization` |
+| Metric Source | CloudWatch Agent | Native EC2 |
+| Action Type | Recovery | Diagnosis |
+| Automatic Fix | Yes | No |
+| SSM Role | Restart + verify | Collect evidence |
+| Verification | HTTPD service check | Diagnostic result status |
+| Human Involvement | On failed recovery | Required for final decision |
 
-Example Linux test command:
+This separation is intentional.
+
+---
+
+## 15. CloudWatch Recovery to OK
+
+CloudWatch continues evaluating `CPUUtilization` independently of the diagnostic workflow.
+
+If CPU utilization later falls below the alarm condition according to the configured evaluation rules:
+
+```text
+CPU Returns to Normal
+       │
+       ▼
+CloudWatch Evaluation
+       │
+       ▼
+cpu alert
+       │
+       ▼
+OK
+```
+
+This does **not** mean the P2 automation performed a corrective action.
+
+The CPU condition may recover naturally or after a later engineer action.
+
+---
+
+## 16. Controlled CPU Test
+
+A lab CPU-load test can be used carefully to validate the alarm.
+
+Example:
 
 ```bash
 yes > /dev/null &
 ```
 
-Identify the test process:
+Find the process:
 
 ```bash
 pgrep -a yes
 ```
 
-Stop the test process:
+Stop the test:
 
 ```bash
 pkill yes
 ```
 
-For a multi-vCPU EC2 instance, a single CPU-consuming process may not raise overall CPU utilization enough to cross the alarm threshold. The test method must therefore match the number of vCPUs and the configured alarm threshold.
+Important:
 
-> Perform CPU-load testing carefully because excessive load can affect the Apache web server and other project components.
+> A single `yes` process may not raise overall instance CPU enough on a multi-vCPU instance.
 
----
+Testing should match the instance CPU capacity and the deployed alarm configuration.
 
-# 10. Expected Automation Flow
-
-```text
-CPU Load Generated
-        │
-        ▼
-EC2 CPU Utilization Increases
-        │
-        ▼
-CloudWatch CPUUtilization
-        │
-        ▼
-P2 CPU Alarm
-        │
-        ▼
-ALARM
-        │
-        ▼
-SNS
-        │
-        ├────────────► NOC Email
-        │
-        ▼
-Lambda
-        │
-        ▼
-SSM Run Command
-        │
-        ▼
-Configured CPU Remediation
-        │
-        ▼
-CPU Condition Verified
-        │
-        ▼
-CloudWatch Recovery
-        │
-        ▼
-OK
-```
+Do not leave artificial CPU load running longer than required.
 
 ---
 
-# 11. Verification Commands
+## 17. Verification Commands
 
-### Check CPU utilization
+### View current CPU/load
 
 ```bash
 top
@@ -343,22 +582,22 @@ or:
 uptime
 ```
 
-### Check CPU information
+### CPU information
 
 ```bash
 lscpu
 ```
 
-### Find CPU-consuming processes
+### Highest CPU-consuming processes
 
 ```bash
 ps aux --sort=-%cpu | head
 ```
 
-### Check CloudWatch Agent
+### Memory status
 
 ```bash
-sudo systemctl status amazon-cloudwatch-agent --no-pager
+free -h
 ```
 
 ### Check SSM Agent
@@ -367,233 +606,232 @@ sudo systemctl status amazon-cloudwatch-agent --no-pager
 sudo systemctl status amazon-ssm-agent --no-pager
 ```
 
-### Check Apache
+### Check HTTPD
 
 ```bash
 sudo systemctl status httpd --no-pager
 ```
 
-### Test the web server
-
-```bash
-curl http://localhost
-```
-
 ---
 
-# 12. Troubleshooting
+## 18. Troubleshooting P2
 
-If the P2 CPU alarm does not trigger, check the following.
+If `cpu alert` does not behave as expected, verify the workflow layer by layer.
 
-## CloudWatch Metric
+### CloudWatch Metric
 
-Verify that the EC2 instance is publishing:
+Verify:
 
 ```text
-AWS/EC2
-CPUUtilization
+Namespace : AWS/EC2
+Metric    : CPUUtilization
 ```
 
 Check:
 
 - Correct EC2 instance.
 - Correct AWS Region.
-- Correct metric dimensions.
+- Correct dimensions.
 - Correct statistic.
 - Correct period.
 - Correct threshold.
 - Correct evaluation periods.
 
-## CloudWatch Alarm
+### CloudWatch Alarm
 
 Verify:
 
-- Alarm exists.
-- Alarm is associated with the correct EC2 instance.
-- Alarm action points to the correct SNS topic.
-- Alarm is enabled.
-- Alarm state changes during the controlled CPU test.
+- Alarm name is `cpu alert`.
+- Alarm monitors the intended EC2 instance.
+- Alarm action points directly to the intended Lambda function.
+- Alarm actions are enabled.
+- Alarm state changes during a controlled test.
 
-## SNS
-
-Verify:
-
-- SNS topic exists.
-- CloudWatch alarm action references the correct topic.
-- Email subscription is confirmed.
-- Lambda subscription exists.
-- Lambda invocation is being received.
-
-## Lambda
-
-Check Lambda execution logs in:
-
-```text
-Amazon CloudWatch Logs
-```
+### Lambda
 
 Verify:
 
-- SNS event is received.
-- Event parsing succeeds.
-- SSM command is submitted.
-- Target instance ID is correct.
-- No IAM authorization error occurs.
+- Lambda receives the direct CloudWatch Alarm event.
+- `event["alarmData"]` parsing succeeds.
+- Alarm state is `ALARM`.
+- Alarm name matches `cpu alert`.
+- Actionable Alarm Gate accepts the P2 incident.
+- Lambda selects the `handle_p2` diagnosis path.
 
-## Systems Manager
+### Systems Manager
 
 Verify:
 
-```bash
-sudo systemctl status amazon-ssm-agent --no-pager
-```
-
-Also check:
-
-- EC2 is registered as a managed node.
+- EC2 is a managed node.
 - SSM Agent is running.
-- EC2 has the required IAM role.
-- SSM Run Command reaches the target instance.
-- Command execution completes successfully.
+- Lambda has required SSM permissions.
+- SSM Run Command reaches the instance.
+- Diagnostic commands complete.
+- Command output is returned.
+
+### SNS
+
+Verify:
+
+- Lambda has `sns:Publish` permission.
+- `TOPIC_ARN` is correct.
+- Subscription is confirmed.
+- Diagnostic notification is received.
+
+Do not check for an SNS → Lambda subscription because that is not part of the current V2.0 path.
 
 ---
 
-# 13. IAM Dependencies
+## 19. IAM Dependencies
 
-The P2 workflow depends on appropriate IAM permissions.
+### Lambda Execution Role
 
-## EC2 Role
+Lambda requires the permissions needed to:
 
-The EC2 instance requires the permissions necessary for Systems Manager management, commonly provided through:
+- Send SSM commands.
+- Read SSM command results.
+- Publish SNS notifications.
+- Read required EC2 instance information.
+- Write Lambda logs.
 
-```text
-AmazonSSMManagedInstanceCore
-```
+### EC2 Instance Role
 
-## Lambda Role
+The EC2 instance requires the permissions necessary to operate as an SSM managed node.
 
-Lambda requires only the permissions needed by the deployed automation, including the required Systems Manager operations and CloudWatch Logs permissions.
-
-The project should use a least-privilege custom policy where practical rather than granting unnecessary broad access.
+Permissions should follow the **Principle of Least Privilege**.
 
 ---
 
-# 14. Important Design Principle
+## 20. Important Design Principle
 
-Each service has a separate responsibility:
+Each component has a separate responsibility:
 
 ```text
 CloudWatch
     │
-    └── Detects high CPU utilization
-
-SNS
-    │
-    └── Distributes the alarm event
+    └── Detects high CPU
 
 Lambda
     │
-    └── Orchestrates remediation
+    └── Validates and classifies P2
 
 SSM
     │
-    └── Executes the remote command
+    └── Collects diagnostic evidence
 
-EC2
+SNS
     │
-    └── Executes the Linux operation
+    └── Delivers the diagnostic report
+
+Engineer
+    │
+    └── Reviews evidence and decides next action
 ```
 
 Therefore:
 
-```text
-Detection ≠ Remediation
-```
-
-This separation makes the NOC automation workflow easier to monitor, troubleshoot, and secure.
+> **Monitoring, diagnosis, and remediation are separate decisions.**
 
 ---
 
-# 15. P1 and P2 Relationship
+## 21. Three-Level Interview Answer
 
-The project uses two severity levels:
+### Level 1
 
-| Severity | Condition | Primary Monitoring |
-| --- | --- | --- |
-| **P1 – Critical** | Apache HTTPD service failure | HTTPD process/service alarm |
-| **P2 – High** | High EC2 CPU utilization | `CPUUtilization` alarm |
+> **`cpu alert` is the P2 CloudWatch alarm that detects high EC2 CPU utilization and starts a diagnostic-only workflow.**
 
-P1 represents a critical application/service availability problem.
+### Level 2
 
-P2 represents a high-severity infrastructure performance problem.
+> **CloudWatch monitors the native EC2 `CPUUtilization` metric. When the configured P2 condition is met, the alarm event goes directly to Lambda. Lambda identifies it as P2 and uses SSM to collect CPU, load, process, and memory diagnostics instead of automatically restarting the workload.**
 
-> **P3 is intentionally excluded from the finalized project scope.**
+### Level 3
 
----
-
-# 16. Operational Result
-
-A successful P2 incident should follow this pattern:
-
-```text
-P2 High CPU Condition Detected
-        ↓
-CloudWatch Alarm = ALARM
-        ↓
-SNS Notification
-        ↓
-Lambda Invoked
-        ↓
-SSM Command Executed
-        ↓
-Configured Remediation
-        ↓
-Condition Re-checked
-        ↓
-CloudWatch Recovery
-```
-
-The objective is to detect abnormal CPU utilization, automatically execute the configured remediation, and verify that the infrastructure condition returns to a healthy state.
+> **The Lambda configuration maps `cpu alert` to P2 with `action_type` set to `diagnosis`, `CPUUtilization` as the metric, and a project threshold label of `> 50%`. The P2 handler uses SSM Run Command to execute `uptime`, `ps aux --sort=-%cpu | head -11`, and `free -h`. Lambda captures the SSM result and output, then publishes a diagnostic report to SNS stating that no automatic fix was applied and manual review is required.**
 
 ---
 
-# 17. Repository Reference
-
-Recommended location:
+## 22. Complete P2 Flow
 
 ```text
-cloudops-noc/
-│
-├── cloudwatch/
-│   ├── alarms/
-│   │   ├── httpd-alarm.md
-│   │   └── cpu-alarm.md
-│   │
-│   └── dashboard.json
-```
-
----
-
-# 18. Summary
-
-The CPU Utilization alarm is the **P2 – High** monitoring and automation mechanism for EC2 CPU performance.
-
-It connects monitoring with the project's automated remediation pipeline:
-
-```text
-CloudWatch
-    ↓
-SNS
-    ↓
+Amazon EC2
+     │
+     ▼
+CPUUtilization
+     │
+     ▼
+Amazon CloudWatch
+     │
+     ▼
+cpu alert
+     │
+     ▼
+ALARM
+     │
+     ▼
+Direct Alarm Event
+     │
+     ▼
 Lambda
-    ↓
-SSM
-    ↓
-EC2
-    ↓
-Configured CPU Remediation
+     │
+     ▼
+Alarm Parser
+     │
+     ▼
+Actionable Alarm Gate
+     │
+     ▼
+P2 Classification
+     │
+     ▼
+Boto3 / SSM
+     │
+     ▼
+SSM Agent
+     │
+     ▼
+CPU / Load / Process / Memory Diagnostics
+     │
+     ▼
+Lambda Captures Result
+     │
+     ▼
+DIAGNOSED
+     │
+     ▼
+SNS
+     │
+     ▼
+Engineer Review
 ```
 
-The P2 workflow demonstrates the project's second operational use case:
+---
 
-> **Detect high CPU utilization, notify the NOC operator, initiate automated remediation, and verify recovery.**
+## 23. Final Summary
+
+`cpu alert` is the finalized **P2 high-CPU detection alarm** in CloudOps NOC Automation V2.0.
+
+The key flow is:
+
+```text
+CloudWatch Detects
+        │
+        ▼
+Lambda Decides
+        │
+        ▼
+SSM Diagnoses
+        │
+        ▼
+SNS Notifies
+        │
+        ▼
+Engineer Decides
+```
+
+P2 intentionally stops at diagnosis and engineer review.
+
+---
+
+## Key Design Statement
+
+> **The `cpu alert` alarm detects high EC2 CPU utilization and sends the alarm event directly to Lambda. Lambda classifies the event as P2 and uses Systems Manager to collect diagnostic evidence. No automatic restart or destructive remediation is performed; the result is sent through SNS for manual review.**
