@@ -1,544 +1,1251 @@
-# Document 8 – Monitoring & Logging Strategy
+# Document 8 — Monitoring & Logging Strategy
 
 ## Project Title
 
-CloudOps NOC Automation Using AWS CloudWatch, SNS, Lambda, and AWS Systems Manager
+**CloudOps NOC Automation V2.0**
 
 ---
 
-# Document Information
+## Document Information
 
 | Item | Details |
-| --- | --- |
+|---|---|
 | Document Name | Monitoring & Logging Strategy |
 | Project | CloudOps NOC Automation |
-| Version | 1.0 |
-| Prepared By | Sujith |
-| Date | August 2026 |
-| Status | Final |
+| Version | 2.0 |
+| Environment | AWS Cloud |
+| Region | `ap-south-1` — Asia Pacific (Mumbai) |
+| Status | Current V2.0 Baseline |
 
 ---
 
 # 1. Purpose
 
-This document defines the monitoring and logging strategy for the CloudOps NOC Automation solution. The strategy provides continuous visibility into the monitored EC2 environment, detects the defined operational conditions, supports automated remediation, and retains logs required for troubleshooting and operational review.
+This document defines the monitoring, alerting, logging, and operational-observability strategy for CloudOps NOC Automation V2.0.
 
-The finalized solution covers two operational automation areas:
+The strategy is designed to:
 
-- **P1 – HTTPD automation:** Detection and automatic recovery of the Apache (httpd) service.
-- **P2 – CPU utilization automation:** Monitoring and automation associated with high CPU utilization.
+- Monitor the EC2 workload.
+- Detect the finalized P1 and P2 conditions.
+- Send actionable CloudWatch Alarm events directly to Lambda.
+- Support P1 automatic HTTPD recovery.
+- Support P2 diagnostic-only handling.
+- Preserve logs and command evidence for troubleshooting.
+- Provide dashboard and alarm visibility.
+- Keep monitoring, diagnosis, remediation, and notification as separate responsibilities.
 
-P3 and Unknown Service automation are intentionally excluded from the finalized project scope.
+The project supports exactly two incident priorities:
 
----
+| Priority | Incident | Response |
+|---|---|---|
+| P1 | Apache HTTPD unavailable | Automatic recovery + verification + stability check |
+| P2 | High EC2 CPU utilization | Diagnostic-only + engineer review |
 
-# 2. Monitoring Objectives
-
-The monitoring strategy is designed to:
-
-- Continuously monitor the EC2 environment.
-- Monitor Apache (httpd) process availability for P1 automation.
-- Monitor CPU utilization for P2 automation.
-- Collect operating-system and application-related metrics through the CloudWatch Agent.
-- Present operational metrics through a CloudWatch Dashboard.
-- Evaluate CloudWatch Alarm conditions.
-- Trigger the appropriate automation workflow when an alarm enters the required state.
-- Maintain Lambda, Systems Manager, CloudWatch Agent, and operating-system logs for troubleshooting.
-- Provide sufficient operational evidence for incident investigation and testing.
+P3 is intentionally excluded.
 
 ---
 
-# 3. Monitoring Architecture
+# 2. Core Monitoring Principle
 
-The monitoring and automation flow is based on AWS managed services.
+The project separates:
 
 ```text
-EC2 Instance
-      |
-      v
-CloudWatch Agent
-      |
-      v
-Amazon CloudWatch Metrics
-      |
-      +----------------------+
-      |                      |
-      v                      v
-CloudWatch Dashboard     CloudWatch Alarms
-                              |
-                              v
-                         Amazon SNS
-                              |
-                              v
-                         AWS Lambda
-                              |
-                              v
-                    AWS Systems Manager
-                              |
-                              v
-                    Automated Remediation
-                              |
-                              v
-                     Verification / Result
-                              |
-                              v
-                     SNS Notification
+Monitoring
+   ↓
+Detection
+   ↓
+Decision
+   ↓
+Remediation / Diagnosis
+   ↓
+Verification
+   ↓
+Notification
 ```
 
-The P1 and P2 workflows use the same monitoring and automation foundation while applying different alarm conditions and remediation logic.
+This means:
+
+> **Detection does not automatically mean remediation.**
+
+P1 has a known failure and a predefined corrective action.
+
+P2 represents an ambiguous operational symptom, so the system collects evidence instead of applying a blind restart.
+
+---
+
+# 3. Correct V2.0 Monitoring Architecture
+
+```text
+                         Amazon EC2
+                              │
+               ┌──────────────┴──────────────┐
+               │                             │
+               ▼                             ▼
+          Apache HTTPD                  EC2 CPU
+               │                             │
+               ▼                             ▼
+       CloudWatch Agent                CPUUtilization
+               │                             │
+            procstat                         │
+               │                             │
+               ▼                             │
+ procstat_lookup_pid_count                   │
+               │                             │
+               └──────────────┬──────────────┘
+                              ▼
+                       Amazon CloudWatch
+                              │
+                     Metrics / Dashboard
+                              │
+                       Alarm Evaluation
+                              │
+                 ┌────────────┴────────────┐
+                 ▼                         ▼
+      NOC-cloudops-automate             cpu alert
+                 │                         │
+                 └────────────┬────────────┘
+                              ▼
+                     Direct Alarm Event
+                              │
+                              ▼
+                           Lambda
+                              │
+                    Parse + Validate
+                              │
+                    Actionable Alarm Gate
+                              │
+                  ┌───────────┴───────────┐
+                  ▼                       ▼
+                 P1                      P2
+                  │                       │
+             Recovery                 Diagnosis
+                  │                       │
+                  └───────────┬───────────┘
+                              ▼
+                             SSM
+                              │
+                              ▼
+                         EC2 / Linux
+                              │
+                              ▼
+                           Result
+                              │
+                              ▼
+                             SNS
+                              │
+                              ▼
+                          Engineer
+```
+
+Important:
+
+> **SNS is not between CloudWatch and Lambda.**
+
+Correct:
+
+```text
+CloudWatch → Lambda
+```
+
+Notification:
+
+```text
+Lambda → SNS → Engineer
+```
 
 ---
 
 # 4. Monitoring Components
 
-| AWS Service / Component | Monitoring or Logging Purpose |
-| --- | --- |
-| Amazon EC2 | Hosts the monitored workload and agents |
-| CloudWatch Agent | Collects system and process metrics |
-| Amazon CloudWatch | Stores and evaluates monitoring metrics |
-| CloudWatch Dashboard | Provides centralized operational visibility |
-| CloudWatch Alarm | Detects configured P1/P2 conditions |
-| Amazon SNS | Distributes alarm and notification events |
-| AWS Lambda | Processes alarm events and performs automation logic |
-| AWS Systems Manager | Executes remediation commands on the managed EC2 instance |
-| Amazon CloudWatch Logs | Stores Lambda execution and related AWS service logs |
-| EC2 local logs | Provide host-level troubleshooting information |
+| Service / Component | Monitoring or Logging Responsibility |
+|---|---|
+| Amazon EC2 | Hosts the monitored workload |
+| Apache HTTPD | P1 application/service workload |
+| CloudWatch Agent | Publishes configured process/OS metrics |
+| Amazon CloudWatch | Stores metrics, evaluates alarms, provides dashboards/logs |
+| CloudWatch Alarm | Detects the configured P1/P2 conditions |
+| AWS Lambda | Parses, validates, classifies, and orchestrates |
+| AWS Systems Manager | Executes P1 commands and P2 diagnostics |
+| SSM Agent | Executes SSM instructions on EC2 |
+| Amazon SNS | Delivers operational notifications |
+| CloudWatch Logs | Stores Lambda execution logs |
+| Linux / Agent logs | Provide host-level troubleshooting evidence |
 
 ---
 
-# 5. CloudWatch Agent Monitoring
+# 5. Metric Sources
 
-The Amazon CloudWatch Agent runs on the EC2 instance and publishes configured operating-system and application/process metrics to CloudWatch.
+The project uses two different metric sources.
 
-The agent is used as the primary metric collection mechanism for the project.
-
-### Collection Interval
-
-60 seconds.
-
-### Monitoring Areas
-
-- CPU utilization
-- Memory utilization
-- Disk utilization
-- Disk I/O
-- Network traffic
-- Apache/httpd process status
-
-The exact metrics exposed to CloudWatch are used by the dashboard and alarm configurations according to the finalized P1/P2 implementation.
-
----
-
-# 6. P1 – HTTPD Monitoring Strategy
-
-## 6.1 Objective
-
-The P1 workflow monitors Apache (httpd) availability and provides automated recovery when the monitored Apache process is no longer available.
-
-## 6.2 Detection
-
-The CloudWatch Agent collects the Apache process metric.
-
-The relevant condition is:
+## P1 Source
 
 ```text
-Apache/httpd process count = 0
+Apache HTTPD
+      │
+      ▼
+CloudWatch Agent
+      │
+      ▼
+procstat
+      │
+      ▼
+procstat_lookup_pid_count
 ```
 
-When the configured alarm condition is met, the CloudWatch Alarm transitions into the `ALARM` state.
-
-## 6.3 Remediation Flow
+## P2 Source
 
 ```text
-Apache/httpd process unavailable
-          |
-          v
-CloudWatch Agent metric
-          |
-          v
-CloudWatch Alarm
-          |
-          v
-SNS
-          |
-          v
-Lambda
-          |
-          v
-SSM Run Command
-          |
-          v
-Restart httpd
-          |
-          v
-Verify service
+Amazon EC2
+      │
+      ▼
+AWS/EC2
+CPUUtilization
 ```
 
-The Lambda workflow uses AWS Systems Manager to perform the service recovery rather than requiring manual SSH intervention.
+This distinction is important:
+
+> **P1 depends on the CloudWatch Agent. P2 uses the native EC2 `CPUUtilization` metric.**
 
 ---
 
-# 7. P2 – CPU Utilization Monitoring Strategy
+# 6. Canonical CloudWatch Agent Configuration
 
-## 7.1 Objective
+The canonical repository configuration is:
 
-The P2 workflow monitors CPU utilization and provides the automation path associated with the finalized CPU utilization alarm.
+[View `cloudwatch-agent-config.json`](../CloudWatch/cloudwatch-agent-config.json)
 
-## 7.2 Detection
+The deployment script is:
 
-CloudWatch evaluates the configured CPU utilization metric against the defined alarm condition.
+[View `01-configure-cloudwatch-agent.sh`](../Scripts/Configuration/01-configure-cloudwatch-agent.sh)
 
-When the configured CPU condition is met:
+Current canonical configuration:
 
 ```text
-High CPU utilization
-        |
-        v
-CloudWatch Alarm
-        |
-        v
-SNS
-        |
-        v
-Lambda automation
-        |
-        v
-Configured P2 remediation
+Namespace           : CWAgent
+Collection Interval : 60 seconds
+Process Match       : httpd
+Process Measurement : pid_count
 ```
 
-The P2 workflow is separate from the P1 Apache recovery workflow and must not be interpreted as an Apache-service failure.
+The agent also publishes configured CPU measurements for additional observability.
+
+Important:
+
+> The P2 `cpu alert` uses the native `AWS/EC2` `CPUUtilization` metric, not the CloudWatch Agent CPU measurements.
 
 ---
 
-# 8. CloudWatch Dashboard
+# 7. CloudWatch Agent CPU Metrics
 
-The project uses a CloudWatch Dashboard to provide centralized operational visibility.
-
-### Dashboard
+The canonical agent configuration includes:
 
 ```text
-cloudops-NOC-dashboard
+cpu_usage_idle
+cpu_usage_user
+cpu_usage_system
 ```
 
-### Dashboard Monitoring Areas
+These metrics provide additional operating-system visibility.
 
-- CPU utilization
-- Memory utilization
-- Disk utilization
-- Network metrics
-- Apache/httpd process status
+They are not the source of the current P2 alarm.
 
-The dashboard is used during normal monitoring, testing, incident investigation, and post-remediation verification.
+Current P2 source:
+
+```text
+AWS/EC2
+CPUUtilization
+```
+
+This avoids mixing two different CPU metric sources.
 
 ---
 
-# 9. CloudWatch Alarm Strategy
+# 8. `procstat` Monitoring
 
-The finalized project uses two severity levels.
+`procstat` is the CloudWatch Agent process-monitoring component.
 
-| Severity | Monitoring Area | Purpose |
-| --- | --- | --- |
-| P1 | Apache/httpd | Detect and automatically recover Apache service failure |
-| P2 | CPU utilization | Detect and process high CPU utilization conditions |
+In this project:
 
-### P1 Alarm
+```text
+procstat
+   │
+   ▼
+Match httpd
+   │
+   ▼
+Count matching PIDs
+   │
+   ▼
+procstat_lookup_pid_count
+```
 
-The current working CloudWatch alarm used for the Apache automation is:
+`procstat` is not the same as Linux `/proc`.
+
+```text
+/proc
+= Linux virtual filesystem exposing process information
+
+procstat
+= CloudWatch Agent process-monitoring component
+```
+
+---
+
+# 9. P1 Monitoring Strategy
+
+## Objective
+
+Detect when the configured Apache HTTPD process is no longer present.
+
+Current alarm:
 
 ```text
 NOC-cloudops-automate
 ```
 
-Its purpose is to detect the Apache process failure condition and initiate the P1 automation workflow.
+Metric:
 
-### P2 Alarm
+```text
+procstat_lookup_pid_count
+```
 
-The CPU utilization automation is represented by the finalized CPU monitoring workflow.
+Configured condition:
 
-The alarm evaluates CPU utilization against its configured threshold and initiates the P2 workflow when the condition is met.
+```text
+< 1
+```
 
-### Scope Control
+Reference:
 
-The following are intentionally excluded:
-
-- P3
-- Unknown Service automation
-- Unwanted legacy notifications associated with those flows
-
-This prevents the finalized monitoring strategy from reintroducing retired automation behavior.
+[View P1 alarm documentation](../CloudWatch/NOC-cloudops-automate.md)
 
 ---
 
-# 10. Alerting and Automation Strategy
+# 10. P1 Normal State
 
-When a configured alarm enters the required state:
-
-1. CloudWatch changes the alarm state.
-2. The configured notification path publishes the alarm event to Amazon SNS.
-3. SNS invokes the Lambda automation workflow.
-4. Lambda parses and validates the incoming event.
-5. Lambda identifies the applicable automation path.
-6. AWS Systems Manager is used where remediation requires EC2 command execution.
-7. The remediation result is evaluated.
-8. A notification is generated for the resulting operational state.
-
-For P1, the remediation includes restarting Apache and verifying the service result.
-
-For P2, the automation follows the finalized CPU-utilization remediation logic implemented for the project.
-
----
-
-# 11. Logging Strategy
-
-Logging is maintained at multiple levels so that each stage of the monitoring and remediation workflow can be investigated independently.
-
-## 11.1 Lambda Logs
-
-Lambda execution logs are stored in Amazon CloudWatch Logs.
-
-The logs are used to investigate:
-
-- Incoming alarm events
-- Event parsing
-- Alarm/severity identification
-- Automation decisions
-- Systems Manager requests
-- Command results
-- Verification results
-- Notification results
-- Exceptions and failures
-
-These logs are particularly important when troubleshooting alarm-triggered automation.
+```text
+HTTPD Running
+     │
+     ▼
+Matching HTTPD PIDs Present
+     │
+     ▼
+procstat_lookup_pid_count >= 1
+     │
+     ▼
+Alarm Condition Not Met
+     │
+     ▼
+Alarm = OK
+```
 
 ---
 
-## 11.2 Systems Manager Logs
+# 11. P1 Failure Detection
 
-AWS Systems Manager provides execution information for commands sent to the EC2 managed node.
+```text
+HTTPD Stops
+    │
+    ▼
+Matching HTTPD PIDs Disappear
+    │
+    ▼
+procstat_lookup_pid_count = 0
+    │
+    ▼
+NOC-cloudops-automate
+    │
+    ▼
+ALARM
+```
 
-Logs and execution information are used to verify:
+The CloudWatch alarm is responsible for **detection**, not remediation.
 
-- Whether the Run Command was received.
-- Whether the command was executed.
-- Whether the command completed successfully.
-- Whether the target managed node was available.
+---
 
-The EC2 host also maintains SSM Agent logs under:
+# 12. P1 Automation Flow
+
+```text
+NOC-cloudops-automate
+        │
+        ▼
+Direct Alarm Event
+        │
+        ▼
+Lambda
+        │
+        ▼
+event["alarmData"]
+        │
+        ▼
+Actionable Alarm Gate
+        │
+        ▼
+P1
+        │
+        ▼
+SSM SendCommand
+        │
+        ▼
+systemctl restart httpd
+        │
+        ▼
+systemctl is-active httpd
+        │
+        ▼
+Stability Verification
+        │
+        ▼
+Resolved / Escalated
+        │
+        ▼
+SNS
+```
+
+The current workflow also uses bounded retry behavior.
+
+---
+
+# 13. P1 Process Metric Limitation
+
+A positive PID count means:
+
+> Matching HTTPD processes exist.
+
+It does **not** prove:
+
+```text
+Website fully healthy
+HTTP request successful
+Application response correct
+Network path healthy
+```
+
+Therefore process monitoring is an availability signal, not complete application-health monitoring.
+
+For deeper validation, commands such as:
+
+```bash
+curl http://localhost
+```
+
+and Apache logs can be used during troubleshooting.
+
+---
+
+# 14. P2 Monitoring Strategy
+
+Current P2 alarm:
+
+```text
+cpu alert
+```
+
+Metric:
+
+```text
+AWS/EC2
+CPUUtilization
+```
+
+Current project threshold label:
+
+```text
+> 50%
+```
+
+Reference:
+
+[View P2 alarm documentation](../CloudWatch/cpu%20alert.md)
+
+---
+
+# 15. P2 Detection Flow
+
+```text
+EC2 CPU Activity
+      │
+      ▼
+CPUUtilization
+      │
+      ▼
+CloudWatch
+      │
+      ▼
+cpu alert
+      │
+      ▼
+ALARM
+      │
+      ▼
+Direct Alarm Event
+      │
+      ▼
+Lambda
+```
+
+---
+
+# 16. P2 Is Diagnostic-Only
+
+The current P2 workflow does not perform automatic remediation.
+
+Correct:
+
+```text
+High CPU
+   │
+   ▼
+Detect
+   │
+   ▼
+Diagnose
+   │
+   ▼
+Collect Evidence
+   │
+   ▼
+Notify Engineer
+```
+
+Not:
+
+```text
+High CPU
+   │
+   ▼
+Automatic Restart
+```
+
+Possible high-CPU causes include:
+
+- Legitimate traffic.
+- Background processes.
+- Application load.
+- Resource contention.
+- Unexpected process behavior.
+
+---
+
+# 17. P2 Diagnostic Evidence
+
+Lambda uses Systems Manager to collect evidence using commands equivalent to:
+
+```bash
+uptime
+ps aux --sort=-%cpu | head -11
+free -h
+```
+
+This provides:
+
+| Command | Evidence |
+|---|---|
+| `uptime` | Uptime and load averages |
+| `ps aux --sort=-%cpu | head -11` | Highest CPU-consuming processes |
+| `free -h` | Memory state |
+
+Flow:
+
+```text
+cpu alert
+    │
+    ▼
+Lambda
+    │
+    ▼
+SSM
+    │
+    ▼
+Diagnostics
+    │
+    ▼
+Result
+    │
+    ▼
+SNS
+    │
+    ▼
+Engineer Review
+```
+
+---
+
+# 18. P1 vs P2 Monitoring Model
+
+| Characteristic | P1 | P2 |
+|---|---|---|
+| Alarm | `NOC-cloudops-automate` | `cpu alert` |
+| Metric | `procstat_lookup_pid_count` | `CPUUtilization` |
+| Metric Source | CloudWatch Agent | Native EC2 |
+| Response | Recovery | Diagnosis |
+| Automatic Fix | Yes | No |
+| SSM Usage | Restart + verify | Collect evidence |
+| Human Review | On escalation | Required |
+
+---
+
+# 19. CloudWatch Dashboard Strategy
+
+Current dashboard:
+
+```text
+cloudops-NOC-dashboard
+```
+
+The dashboard provides centralized visibility for:
+
+- Normal monitoring.
+- Controlled incident testing.
+- Troubleshooting.
+- Post-incident review.
+
+At minimum, the current monitoring baseline can visualize:
+
+```text
+AWS/EC2 CPUUtilization
+CWAgent HTTPD process count
+CWAgent configured CPU metrics
+```
+
+Additional memory, disk, network, or application widgets may be added only when the corresponding metric collection is actually configured.
+
+This avoids documenting dashboard metrics that are not currently produced by the canonical CloudWatch Agent configuration.
+
+---
+
+# 20. CloudWatch Alarm Strategy
+
+The finalized project has two active incident priorities.
+
+| Priority | Alarm | Purpose |
+|---|---|---|
+| P1 | `NOC-cloudops-automate` | Detect HTTPD process unavailability |
+| P2 | `cpu alert` | Detect high EC2 CPU utilization |
+
+Unknown/test alarms are not approved operational incidents.
+
+The Lambda Actionable Alarm Gate ignores unsupported alarms.
+
+---
+
+# 21. Alarm States
+
+CloudWatch alarms can enter:
+
+```text
+OK
+ALARM
+INSUFFICIENT_DATA
+```
+
+## OK
+
+The alarm condition is not currently satisfied.
+
+## ALARM
+
+The configured threshold/evaluation condition is satisfied.
+
+## INSUFFICIENT_DATA
+
+CloudWatch does not have enough valid datapoints to determine the current state.
+
+For P1, `INSUFFICIENT_DATA` can occur when the EC2 instance is stopped and the CloudWatch Agent cannot publish new process metrics.
+
+---
+
+# 22. Direct Alarm Event Strategy
+
+When an approved alarm becomes actionable:
+
+```text
+CloudWatch
+    │
+    ▼
+Alarm Event
+    │
+    ▼
+Lambda
+```
+
+Lambda then:
+
+```text
+Receives
+   ↓
+Parses
+   ↓
+Validates
+   ↓
+Classifies
+   ↓
+Orchestrates
+```
+
+The current Lambda parser reads:
+
+```python
+event["alarmData"]
+```
+
+Reference:
+
+[View Lambda implementation](../Lambda/lambda_function.py)
+
+---
+
+# 23. SNS Notification Strategy
+
+SNS is used **after** Lambda processes the incident.
+
+Correct:
+
+```text
+Lambda
+   │
+   ▼
+SNS
+   │
+   ▼
+Engineer
+```
+
+SNS can deliver:
+
+```text
+P1 recovery started
+P1 recovery successful
+P1 recovery failed
+P1 escalation required
+P2 diagnostics started
+P2 diagnostic report
+```
+
+SNS does not deliver alarm events to Lambda in the current V2.0 architecture.
+
+Reference:
+
+[View SNS README](../SNS/README.md)
+
+---
+
+# 24. Logging Strategy Overview
+
+Logging is maintained at multiple layers so that a failure can be isolated.
+
+```text
+Lambda Logs
+SSM Run Command Results
+SSM Agent Logs
+CloudWatch Agent Logs
+Linux Logs
+Apache Logs
+```
+
+Important distinction:
+
+> The current canonical CloudWatch Agent JSON is focused on metrics and does not currently define log-file collection.
+
+Therefore Apache/Linux logs are treated as **local EC2 troubleshooting sources** unless log shipping is explicitly re-added to the CloudWatch Agent configuration.
+
+---
+
+# 25. Lambda Logs
+
+Lambda execution logs are stored in CloudWatch Logs through the normal Lambda logging integration.
+
+They can be used to investigate:
+
+- Incoming alarm event.
+- `event["alarmData"]` parsing.
+- Alarm name/state.
+- Actionable Alarm Gate result.
+- P1/P2 classification.
+- Incident ID generation.
+- SSM command request.
+- SSM Command ID.
+- Command status/output.
+- P1 verification.
+- P1 stability result.
+- P2 diagnostic result.
+- SNS publish status.
+- Exceptions and failures.
+
+Repository reference:
+
+[View Lambda README](../Lambda/README.md)
+
+---
+
+# 26. Systems Manager Execution Evidence
+
+Systems Manager Run Command provides:
+
+```text
+Command ID
+Target
+Execution Status
+Standard Output
+Standard Error
+```
+
+Lambda retrieves command results using the SSM API.
+
+This allows the workflow to distinguish:
+
+```text
+Command submitted
+```
+
+from:
+
+```text
+Command executed successfully
+```
+
+Reference:
+
+[View SSM README](../SSM/README.md)
+
+---
+
+# 27. SSM Agent Logs
+
+On EC2, SSM Agent logs are available under:
 
 ```text
 /var/log/amazon/ssm/
 ```
 
+These logs are useful when:
+
+- The instance is not appearing as a managed node.
+- Commands do not reach the instance.
+- Agent communication fails.
+- Local command execution reports unexpected errors.
+
+Example:
+
+```bash
+sudo tail -n 50 /var/log/amazon/ssm/amazon-ssm-agent.log
+```
+
 ---
 
-## 11.3 CloudWatch Agent Logs
+# 28. CloudWatch Agent Logs
 
-The CloudWatch Agent maintains local logs that can be used when metrics stop appearing or metric collection behaves unexpectedly.
-
-Typical location:
+CloudWatch Agent local logs are typically under:
 
 ```text
 /opt/aws/amazon-cloudwatch-agent/logs/
 ```
 
-These logs help investigate:
+These are useful for investigating:
 
-- Agent startup
-- Configuration loading
-- Metric collection
-- Metric publishing
-- Agent errors
+- Agent startup.
+- Configuration parsing.
+- Metric collection.
+- Metric publishing.
+- AWS communication errors.
+
+Example:
+
+```bash
+sudo ls -lah /opt/aws/amazon-cloudwatch-agent/logs/
+```
 
 ---
 
-## 11.4 Operating System Logs
+# 29. Apache Logs
 
-The EC2 instance operating-system logs are used for host-level troubleshooting.
+Apache commonly provides:
 
-A commonly used system log is:
+```text
+/var/log/httpd/access_log
+/var/log/httpd/error_log
+```
+
+## Access Log
+
+Helps answer:
+
+> What requests reached Apache and what response activity occurred?
+
+## Error Log
+
+Helps answer:
+
+> What Apache-side error or operational problem occurred?
+
+These remain local troubleshooting sources in the current canonical monitoring baseline unless CloudWatch Agent log collection is explicitly configured later.
+
+---
+
+# 30. Linux Operating-System Logs
+
+A common Amazon Linux system log is:
 
 ```text
 /var/log/messages
 ```
 
-These logs can help correlate application, service, and operating-system events with CloudWatch alarm activity.
+Other logs may also be relevant depending on the problem.
 
----
-
-# 12. Notification Strategy
-
-Amazon SNS provides the notification and event-distribution layer.
-
-The finalized workflow uses SNS for:
-
-- Delivering alarm events to Lambda.
-- Sending operational notifications through the configured notification path.
-- Communicating remediation results.
-
-For P1, a successful Apache recovery is reported after the Lambda/SSM workflow verifies the result.
-
-The notification content should identify the relevant incident, target instance, action performed, and final result.
-
----
-
-# 13. Operational Monitoring Workflow
-
-## P1 – Apache Failure
+Linux logs can help correlate:
 
 ```text
-Apache/httpd Running
-        |
-        v
+Service events
+Agent events
+Operating-system events
+Network events
+```
+
+with the CloudWatch alarm timeline.
+
+---
+
+# 31. Metrics vs Logs
+
+Metrics answer:
+
+> **Is something abnormal?**
+
+Examples:
+
+```text
+procstat_lookup_pid_count
+CPUUtilization
+```
+
+Logs answer:
+
+> **What happened and why?**
+
+Examples:
+
+```text
+Lambda execution logs
+Apache error logs
+SSM Agent logs
+CloudWatch Agent logs
+```
+
+Easy distinction:
+
+```text
+Metrics
+= Detection / trends
+
+Logs
+= Investigation / evidence
+```
+
+---
+
+# 32. Monitoring Troubleshooting Order
+
+Troubleshoot from the source toward the result.
+
+## P1
+
+```text
+HTTPD
+  ↓
 CloudWatch Agent
-        |
-        v
-Apache Process Metric
-        |
-        v
+  ↓
+procstat metric
+  ↓
 CloudWatch Alarm
-        |
-Apache stops
-        |
-        v
-Alarm = ALARM
-        |
-        v
-SNS
-        |
-        v
+  ↓
 Lambda
-        |
-        v
-SSM Run Command
-        |
-        v
-Restart httpd
-        |
-        v
-Verify Apache
-        |
-        v
-Success / Failure Result
+  ↓
+SSM
+  ↓
+HTTPD recovery
+  ↓
+SNS
 ```
 
-## P2 – CPU Utilization
+## P2
 
 ```text
-EC2 CPU Activity
-        |
-        v
-CloudWatch Metric
-        |
-        v
-CPU Alarm Evaluation
-        |
-        v
-Alarm = ALARM
-        |
-        v
-SNS
-        |
-        v
+EC2 CPU
+  ↓
+CPUUtilization
+  ↓
+CloudWatch Alarm
+  ↓
 Lambda
-        |
-        v
-P2 Automation Logic
-        |
-        v
-Remediation / Result
-        |
-        v
-Notification
+  ↓
+SSM diagnostics
+  ↓
+SNS
+```
+
+The first stage where expected behavior stops usually identifies the problem layer.
+
+---
+
+# 33. P1 Monitoring Test
+
+A controlled P1 test can stop HTTPD.
+
+Main command:
+
+```bash
+sudo systemctl stop httpd
+```
+
+Repository script:
+
+[View `stop-httpd.sh`](../Scripts/Operations/stop-httpd.sh)
+
+Expected:
+
+```text
+HTTPD stops
+   ↓
+PID count falls
+   ↓
+P1 alarm = ALARM
+   ↓
+Lambda invoked directly
+   ↓
+SSM restart
+   ↓
+HTTPD active
+   ↓
+Stability verification
+   ↓
+SNS result
+```
+
+Verification references:
+
+- [Verify services](../Scripts/Verification/verify-services.sh)
+- [Health check](../Scripts/Verification/health-check.sh)
+
+---
+
+# 34. P2 Monitoring Test
+
+Generate a controlled CPU condition.
+
+Example lab command:
+
+```bash
+yes > /dev/null &
+```
+
+Stop after testing:
+
+```bash
+pkill yes
+```
+
+Expected:
+
+```text
+CPU increases
+   ↓
+cpu alert = ALARM
+   ↓
+Lambda invoked directly
+   ↓
+P2 classified
+   ↓
+SSM diagnostics
+   ↓
+SNS report
+   ↓
+Engineer review
+```
+
+No automatic restart should occur.
+
+---
+
+# 35. Monitoring Verification Commands
+
+## HTTPD
+
+```bash
+systemctl is-active httpd
+```
+
+## HTTPD Processes
+
+```bash
+pgrep -a httpd
+```
+
+## CloudWatch Agent
+
+```bash
+systemctl is-active amazon-cloudwatch-agent
+```
+
+## SSM Agent
+
+```bash
+systemctl is-active amazon-ssm-agent
+```
+
+## Local HTTP Test
+
+```bash
+curl http://localhost
+```
+
+## CPU / Load
+
+```bash
+uptime
+top
 ```
 
 ---
 
-# 14. Troubleshooting Strategy
+# 36. Repository References
 
-Troubleshooting should follow the monitoring chain from the source metric toward the automation result.
-
-| Check | What to Verify |
-| --- | --- |
-| EC2 | Instance is running and reachable |
-| Apache | `httpd` service/process state for P1 |
-| CloudWatch Agent | Agent is running and publishing metrics |
-| Metrics | Expected CPU/process metrics are updating |
-| Dashboard | Current values are visible |
-| Alarm | Correct condition and state |
-| SNS | Event/notification path is functioning |
-| Lambda | Invocation, event parsing, and execution logs |
-| Systems Manager | Managed node is online and command execution succeeds |
-| Remediation | Expected P1/P2 action completed |
-| Notification | Final result was delivered |
-
-A failure should be isolated by identifying the first stage in the chain where expected behavior stopped.
+| Monitoring Area | Repository Reference |
+|---|---|
+| CloudWatch design | [CloudWatch README](../CloudWatch/README.md) |
+| Canonical agent config | [CloudWatch Agent config](../CloudWatch/cloudwatch-agent-config.json) |
+| Agent config deployment | [Configure agent script](../Scripts/Configuration/01-configure-cloudwatch-agent.sh) |
+| P1 alarm | [P1 alarm](../CloudWatch/NOC-cloudops-automate.md) |
+| P2 alarm | [P2 alarm](../CloudWatch/cpu%20alert.md) |
+| Lambda logic | [Lambda source](../Lambda/lambda_function.py) |
+| Lambda design | [Lambda README](../Lambda/README.md) |
+| SSM design | [SSM README](../SSM/README.md) |
+| SNS design | [SNS README](../SNS/README.md) |
+| Deployment | [Deployment Guide](06-Deployment-Guide.md) |
+| P1 test script | [Stop HTTPD](../Scripts/Operations/stop-httpd.sh) |
+| Verification | [Verify services](../Scripts/Verification/verify-services.sh) |
+| Diagnostics | [Diagnostics scripts](../Scripts/Diagnostics/) |
 
 ---
 
-# 15. Monitoring Test Strategy
+# 37. Monitoring Benefits
 
-The monitoring implementation should be validated using controlled tests.
+The finalized strategy provides:
 
-## P1 Test
-
-1. Confirm Apache is running.
-2. Stop Apache intentionally.
-3. Confirm the Apache process metric reaches the failure condition.
-4. Confirm the P1 alarm enters `ALARM`.
-5. Confirm SNS receives the event.
-6. Confirm Lambda is invoked.
-7. Confirm SSM executes the restart command.
-8. Confirm Apache returns to the running state.
-9. Confirm the remediation result is logged and notified.
-
-## P2 Test
-
-1. Confirm CPU utilization monitoring is active.
-2. Generate the controlled CPU condition required by the configured alarm.
-3. Confirm the P2 alarm enters `ALARM`.
-4. Confirm the SNS/Lambda workflow is triggered.
-5. Confirm the configured P2 automation executes.
-6. Confirm the final result in Lambda/CloudWatch logs and notifications.
-
----
-
-# 16. Monitoring Benefits
-
-The finalized monitoring strategy provides:
-
-- Continuous infrastructure visibility.
-- Dedicated P1 Apache monitoring.
+- Continuous visibility into the defined project conditions.
+- Dedicated P1 HTTPD process monitoring.
 - Dedicated P2 CPU monitoring.
-- Automated incident response.
-- Reduced manual intervention.
-- Faster service recovery for P1.
-- Centralized operational logs.
-- CloudWatch dashboard visibility.
-- Clear separation of finalized severity workflows.
-- Troubleshooting evidence for each automation stage.
+- Event-driven incident handling.
+- Reduced manual intervention for P1.
+- Diagnostic evidence for P2.
+- Centralized Lambda execution logs.
+- Systems Manager execution evidence.
+- Clear separation of detection, decision, recovery, diagnosis, and notification.
+- Controlled testability.
+- Troubleshooting evidence across multiple layers.
 
 ---
 
-# 17. Best Practices Implemented
+# 38. Best Practices Implemented
 
-The solution follows practical AWS monitoring and operational practices:
+The monitoring design follows these practices:
 
-- Native AWS monitoring services are used.
-- Metrics are collected centrally in CloudWatch.
-- Dashboard visibility is provided for operational review.
-- Alarm-driven automation is used instead of continuous manual checking.
-- Lambda execution logs support automation troubleshooting.
-- Systems Manager provides controlled remote command execution.
-- Monitoring and remediation are separated logically by severity.
-- Retired P3/Unknown Service behavior is excluded from the finalized workflow.
-- Testing is performed using controlled failure conditions.
+- Use CloudWatch alarms instead of continuous manual checking.
+- Use a process-specific P1 metric rather than relying only on infrastructure metrics.
+- Use native EC2 `CPUUtilization` for P2.
+- Keep alarm names and incident classifications explicit.
+- Send CloudWatch Alarm events directly to Lambda.
+- Validate alarms through the Actionable Alarm Gate.
+- Keep P1 remediation bounded and verified.
+- Keep P2 diagnostic-only.
+- Maintain logs and SSM command results for troubleshooting.
+- Keep one canonical CloudWatch Agent configuration in the repository.
+- Do not claim metrics or log shipping that are not actually configured.
+- Exclude retired P3/unknown automation behavior.
 
 ---
 
-# 18. Conclusion
+# 39. Three-Level Monitoring Answer
 
-The Monitoring & Logging Strategy provides the operational monitoring foundation for the CloudOps NOC Automation project.
+## Level 1
 
-The finalized solution monitors two defined severity areas: **P1 Apache/httpd availability** and **P2 CPU utilization**. CloudWatch provides metric collection, visualization, and alarm evaluation, while SNS and Lambda provide the event-driven automation path. Systems Manager supports secure command execution for the P1 recovery workflow.
+> **CloudWatch is the monitoring and incident-detection layer of my project.**
 
-The logging strategy provides the evidence required to troubleshoot metric collection, alarm evaluation, Lambda execution, Systems Manager command execution, and remediation results. This enables the project to demonstrate a complete monitoring, alerting, automation, and troubleshooting lifecycle without reintroducing the excluded P3 or Unknown Service workflows.
+## Level 2
+
+> **For P1, the CloudWatch Agent uses procstat to publish the HTTPD process-count metric and CloudWatch evaluates `NOC-cloudops-automate`. For P2, CloudWatch monitors the native EC2 `CPUUtilization` metric through `cpu alert`. When an approved alarm becomes actionable, CloudWatch sends the alarm event directly to Lambda.**
+
+## Level 3
+
+> **The canonical CloudWatch Agent configuration uses a 60-second collection interval and publishes the HTTPD `pid_count` through procstat into the `CWAgent` namespace. This produces the `procstat_lookup_pid_count` signal used for P1. P2 remains independent and uses `AWS/EC2` `CPUUtilization`. Lambda parses `event["alarmData"]`, validates the alarm, and uses SSM for either P1 recovery or P2 diagnostics. Lambda execution logs and SSM command results provide the primary centralized automation evidence, while agent, Linux, and Apache logs remain available for host-level troubleshooting.**
+
+---
+
+# 40. Final Monitoring and Logging Summary
+
+```text
+P1 Monitoring
+
+HTTPD
+  ↓
+CloudWatch Agent
+  ↓
+procstat
+  ↓
+procstat_lookup_pid_count
+  ↓
+NOC-cloudops-automate
+  ↓
+Lambda
+  ↓
+SSM Recovery
+  ↓
+Verification
+  ↓
+SNS
+```
+
+```text
+P2 Monitoring
+
+EC2
+  ↓
+CPUUtilization
+  ↓
+cpu alert
+  ↓
+Lambda
+  ↓
+SSM Diagnostics
+  ↓
+SNS
+  ↓
+Engineer
+```
+
+Logging/evidence:
+
+```text
+Lambda
+→ CloudWatch Logs
+
+SSM
+→ Run Command status/output
+
+SSM Agent
+→ /var/log/amazon/ssm/
+
+CloudWatch Agent
+→ /opt/aws/amazon-cloudwatch-agent/logs/
+
+Apache
+→ access_log / error_log
+
+Linux
+→ /var/log/messages
+```
+
+---
+
+## Key Design Statement
+
+> **CloudWatch provides monitoring and detection, not remediation. P1 uses the CloudWatch Agent HTTPD procstat metric and allows controlled automatic recovery; P2 uses native EC2 CPUUtilization and remains diagnostic-only. CloudWatch sends the alarm event directly to Lambda, while SNS is used afterward for operational notification.**
