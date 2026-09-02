@@ -1,264 +1,170 @@
-SSM OpsCenter Operational Incident Tracking Enhancement
+SSM OpsCenter Enhancement
 
 Post-Review Enhancement
 
-This folder documents an enhancement implemented after the CloudOps NOC Automation V2.0 baseline was reviewed.
+This folder documents a post-review enhancement added after the original CloudOps NOC Automation V2.0 baseline was reviewed.
 
-The reviewed V2.0 remediation architecture remains the baseline:
+The original reviewed baseline remains unchanged:
 
-CloudWatch Alarm
-      ↓
+CloudWatch Alarm → Lambda → SSM Run Command → EC2 → Verification → SNS
+
+This enhancement adds AWS Systems Manager OpsCenter as a parallel incident-tracking path for the P1 HTTPD alarm.
+
+1) Enhancement Overview
+
+What stayed the same
+
+P1 still uses:
+
+CloudWatch Agent
+
+procstat_lookup_pid_count
+
+NOC-cloudops-automate
+
 Lambda
-      ↓
+
 SSM Run Command
-      ↓
-EC2
-      ↓
-HTTPD Remediation
-      ↓
-Verification / Stability Check
-      ↓
-SNS Notification or Escalation
 
-This enhancement does not replace or redesign that flow. It adds AWS Systems Manager OpsCenter as a parallel alarm action so P1 incidents can also be recorded and tracked as OpsItems.
+HTTPD remediation
 
-1. Enhancement Summary
+SNS notification / escalation
 
-The original CloudOps NOC Automation V2.0 project already handled the technical incident-response workflow for the supported incidents:
+P2 remains:
 
-Detect
-  ↓
-Decide
-  ↓
-Remediate or Diagnose
-  ↓
-Verify
-  ↓
-Notify / Escalate
+CPU diagnostic-only
 
-For P1 HTTPD, CloudWatch detects the HTTPD process failure and invokes Lambda directly. Lambda applies the Actionable Alarm Gate and uses Systems Manager Run Command to perform controlled remediation on EC2.
+No automatic CPU remediation
 
-For P2 CPU, the workflow remains diagnostic-only. No automatic CPU remediation is introduced by this enhancement.
+What was added
 
-The new enhancement adds a second responsibility:
+A parallel CloudWatch alarm action to create an OpsItem in Systems Manager OpsCenter
 
-Record and track the P1 operational incident in Systems Manager OpsCenter.
-
-When the existing P1 CloudWatch alarm enters the ALARM state, it now has two independent actions:
-
-                     NOC-cloudops-automate
-                              │
-                 ┌────────────┴────────────┐
-                 │                         │
-                 ▼                         ▼
-              Lambda                 SSM OpsCenter
-                 │                         │
-                 ▼                         ▼
-          Existing P1 Flow              OpsItem
-
-The Lambda remediation action remains unchanged.
-
-2. Base Project
+2) Base Project Scope
 
 Item
 
-Current Design
+Value
 
 Project
 
 CloudOps NOC Automation
 
-Reviewed baseline
+Baseline version
 
 V2.0
 
 Enhancement
 
-Systems Manager OpsCenter operational incident tracking
+Systems Manager OpsCenter
 
 Enhancement timing
 
 Post-review
 
-Scope
-
-P1 HTTPD incident tracking
-
-Primary P1 alarm
+P1 alarm
 
 NOC-cloudops-automate
 
 P2
 
-CPU diagnostic-only; unchanged
+Diagnostic-only
 
-Primary AWS services
+AWS service scope
 
 IAM, EC2, VPC, CloudWatch, SNS, Systems Manager, Lambda
 
-Service-count clarification
+Important: OpsCenter is a capability of Systems Manager, not a separate eighth AWS service.
 
-OpsCenter is a capability of AWS Systems Manager.
+3) Why This Enhancement Was Added
 
-Therefore, the project still uses the same seven primary AWS services:
+The original V2.0 project could:
 
-IAM
-EC2
-VPC
-CloudWatch
-SNS
-Systems Manager
-Lambda
+detect the incident,
 
-OpsCenter is not counted as an eighth AWS service.
+decide the action,
 
-3. Why This Enhancement Was Added
+remediate the issue,
 
-The reviewed V2.0 implementation already automated technical response, but it did not maintain a formal OpsCenter record for each supported P1 alarm.
+verify the result,
 
-The enhancement adds an operational record containing information such as:
+and notify or escalate.
 
-the event/alarm source,
+But it did not maintain a formal incident record inside OpsCenter.
 
-the OpsItem creation time,
+This enhancement adds:
 
-severity,
+incident recording
 
-current status,
+incident tracking
 
-related alarm information,
+status management
 
-and the final resolution state.
+OpsItem lifecycle visibility
 
-This improves the operational lifecycle from only responding to a problem to also recording and tracking it.
+4) Reviewed V2.0 Baseline Architecture
 
-A simplified view is:
+flowchart TD
+    A[HTTPD Failure] --> B[CloudWatch Agent]
+    B --> C[procstat_lookup_pid_count]
+    C --> D[NOC-cloudops-automate]
+    D --> E[Lambda]
+    E --> F[Alarm Parsing]
+    F --> G[Actionable Alarm Gate]
+    G --> H[SSM Run Command]
+    H --> I[SSM Agent on EC2]
+    I --> J[systemctl restart httpd]
+    J --> K[Verification]
+    K --> L[Stability Check]
+    L --> M[SNS Recovery or Escalation]
 
-                     Detection
-                        │
-             ┌──────────┴──────────┐
-             │                     │
-             ▼                     ▼
-        Technical Response      Incident Record
-             │                     │
-             ▼                     ▼
-      Remediate / Verify          Track
-             │                     │
-             └──────────┬──────────┘
-                        ▼
-                 Notify / Resolve
+This is still the reviewed remediation baseline.
 
-4. Architecture
+5) New OpsCenter Path
 
-4.1 Reviewed V2.0 P1 Remediation Path
+flowchart TD
+    A[NOC-cloudops-automate] --> B[Systems Manager OpsCenter]
+    B --> C[OpsItem Created]
+    C --> D[Open]
+    D --> E[In Progress]
+    E --> F[Resolved]
 
-EC2 HTTPD
-   ↓
-CloudWatch Agent
-   ↓
-procstat_lookup_pid_count
-   ↓
-CloudWatch Alarm
-NOC-cloudops-automate
-   ↓
-Lambda
-   ↓
-Alarm Parsing
-   ↓
-Actionable Alarm Gate
-   ↓
-SSM Run Command
-   ↓
-SSM Agent on EC2
-   ↓
-systemctl restart httpd
-   ↓
-Verification
-   ↓
-One Retry if Required
-   ↓
-15-Second Stability Recheck
-   ↓
-SNS Recovery Notification
-or
-SNS Escalation
+This path is added, not substituted.
 
-This remains the project's original P1 remediation path.
+6) Combined Enhanced Architecture
 
-4.2 New OpsCenter Path
+flowchart TD
+    A[HTTPD Failure] --> B[CloudWatch Agent]
+    B --> C[procstat_lookup_pid_count]
+    C --> D[NOC-cloudops-automate]
 
-CloudWatch Alarm
-NOC-cloudops-automate
-        ↓
-Systems Manager OpsCenter
-        ↓
-OpsItem
-        ↓
-Open
-        ↓
-Manual Status Management
-        ↓
-In Progress / Resolved
+    D --> E[Lambda]
+    D --> F[SSM OpsCenter]
 
-4.3 Combined Architecture
+    E --> G[Alarm Parsing]
+    G --> H[Actionable Alarm Gate]
+    H --> I[SSM Run Command]
+    I --> J[SSM Agent on EC2]
+    J --> K[systemctl restart httpd]
+    K --> L[Verification]
+    L --> M[Stability Check]
+    M --> N[SNS Recovery Notification]
+    M --> O[SNS Escalation]
 
-                         HTTPD Failure
-                              │
-                              ▼
-                       CloudWatch Agent
-                              │
-                              ▼
-                 procstat_lookup_pid_count
-                              │
-                              ▼
-                    NOC-cloudops-automate
-                              │
-              ┌───────────────┴────────────────┐
-              │                                │
-              ▼                                ▼
-           Lambda                        SSM OpsCenter
-              │                                │
-              ▼                                ▼
-     Actionable Alarm Gate                   OpsItem
-              │                                │
-              ▼                                ▼
-       SSM Run Command                       Open
-              │                                │
-              ▼                                │
-             EC2                               │
-              │                                │
-              ▼                                │
-     systemctl restart httpd                   │
-              │                                │
-              ▼                                │
-        Verification                           │
-              │                                │
-        ┌─────┴─────┐                          │
-        │           │                          │
-        ▼           ▼                          │
-     Success      Failure                      │
-        │           │                          │
-        ▼           ▼                          │
- SNS Recovery   SNS Escalation                 │
- Notification       │                          │
-        │           ▼                          │
-        │     Engineer Investigation           │
-        │           │                          │
-        │           └──────────────┐           │
-        │                          │           │
-        └──────────────────────────┼───────────┘
-                                   ▼
-                         Manual OpsItem Update
-                                   │
-                        ┌──────────┴───────────┐
-                        ▼                      ▼
-                   In Progress             Resolved
+    F --> P[OpsItem]
+    P --> Q[Open]
+    Q --> R[In Progress]
+    R --> S[Resolved]
 
-The two CloudWatch actions are parallel. OpsCenter does not sit between CloudWatch and Lambda.
+Key point
 
-5. Systems Manager Responsibilities
+CloudWatch → Lambda remains the remediation path
 
-AWS Systems Manager now has two clearly separated responsibilities in this project.
+CloudWatch → OpsCenter is the incident-tracking path
+
+These two actions are parallel
+
+7) Systems Manager Responsibilities
 
 Systems Manager capability
 
@@ -270,57 +176,31 @@ Controlled command execution on EC2
 
 OpsCenter
 
-Operational issue recording and tracking
+Incident recording and tracking
 
 SSM Agent
 
-Receives Systems Manager commands on the EC2 instance
+Receives and executes Systems Manager commands on EC2
 
-Run Command — Technical Remediation
+Technical remediation path
 
-Lambda
-   ↓
-Boto3
-   ↓
-SSM SendCommand API
-   ↓
-AWS-RunShellScript
-   ↓
-SSM Agent
-   ↓
-EC2
-   ↓
-systemctl restart httpd
+Lambda → Boto3 → SSM SendCommand → AWS-RunShellScript → SSM Agent → EC2
 
-Purpose:
+Operational tracking path
 
-Fix the supported technical problem.
+CloudWatch Alarm → OpsCenter → OpsItem → Status Tracking
 
-OpsCenter — Operational Tracking
+8) What Is an OpsItem?
 
-CloudWatch Alarm
-      ↓
-OpsCenter Action
-      ↓
-OpsItem
-      ↓
-Status Tracking
+An OpsItem is an operational work item in Systems Manager OpsCenter.
 
-Purpose:
+For this enhancement, when the P1 alarm enters the ALARM state, OpsCenter creates an OpsItem.
 
-Record what happened and track the operational issue to closure.
-
-6. What Is an OpsItem?
-
-An OpsItem is an operational work item stored in Systems Manager OpsCenter.
-
-For this enhancement, the existing P1 alarm automatically creates an OpsItem when the alarm enters the ALARM state.
-
-During testing, the OpsItem recorded information including:
+Example test values
 
 Field
 
-Tested Value
+Value
 
 Source
 
@@ -338,455 +218,242 @@ Initial status
 
 Open
 
-Severity 1 was selected for the P1 test. In OpsCenter, severity values range from 1 to 4, with 1 representing the highest severity.
+9) OpsItem Status Lifecycle
 
-The OpsItem continues to provide an operational record even after HTTPD has recovered and can later be marked Resolved.
+A) When automatic recovery succeeds
 
-7. OpsItem Status Lifecycle
+flowchart TD
+    A[Alarm Triggered] --> B[OpsItem Open]
+    B --> C[Lambda + SSM Recovery]
+    C --> D[Verification Success]
+    D --> E[SNS Recovery Notification]
+    E --> F[Engineer Review]
+    F --> G[Resolved]
 
-In the current implementation:
-
-OpsItem creation is automatic.
-
-Remediation remains automatic for the supported P1 failure.
-
-OpsItem status changes are manual.
-
-The relevant statuses used in this project are:
-
-Status
-
-Project Meaning
-
-Open
-
-OpsItem was created and requires review
-
-In Progress
-
-An engineer is actively investigating or working on the incident
-
-Resolved
-
-The operational issue has been closed
-
-Scenario A — P1 Automated Recovery Succeeds
-
-HTTPD Failure
-      ↓
-CloudWatch ALARM
-      ↓
-OpsItem Created: Open
-      │
-      └───────────────┐
-                      │
-Lambda + SSM Recovery │
-      ↓               │
-HTTPD Active          │
-      ↓               │
-Verification Passes   │
-      ↓               │
-SNS Recovery          │
-Notification          │
-      ↓               │
-Engineer Reviews ─────┘
-      ↓
-Resolved
-
-Typical status lifecycle:
+Typical status flow:
 
 Open → Resolved
 
-In Progress is not required when automatic remediation succeeds and no additional investigation is needed.
+B) When automatic recovery fails
 
-Scenario B — P1 Automated Recovery Fails
+flowchart TD
+    A[Alarm Triggered] --> B[OpsItem Open]
+    B --> C[Lambda + SSM Recovery Attempt]
+    C --> D[Recovery Failure]
+    D --> E[SNS Escalation]
+    E --> F[Engineer Investigation]
+    F --> G[In Progress]
+    G --> H[Manual / Additional Action]
+    H --> I[Resolved]
 
-HTTPD Failure
-      ↓
-CloudWatch ALARM
-      ↓
-OpsItem Created: Open
-      ↓
-Lambda + SSM Recovery Attempt
-      ↓
-Recovery Failure
-      ↓
-SNS Escalation
-      ↓
-Engineer Investigation
-      ↓
-In Progress
-      ↓
-Manual / Additional Action
-      ↓
-Resolved
-
-Typical status lifecycle:
+Typical status flow:
 
 Open → In Progress → Resolved
 
-8. Implementation Change
+10) Before vs After
 
-Only one architectural capability was added to the existing P1 alarm.
+Before enhancement
 
-Before the enhancement
+flowchart TD
+    A[NOC-cloudops-automate] --> B[Lambda]
+    B --> C[Existing Automated Remediation]
 
-NOC-cloudops-automate
-        ↓
-      Lambda
-        ↓
-Existing Automated Remediation
+After enhancement
 
-After the enhancement
+flowchart TD
+    A[NOC-cloudops-automate] --> B[Lambda]
+    A[NOC-cloudops-automate] --> C[SSM OpsCenter]
+    B --> D[Existing Automated Remediation]
+    C --> E[OpsItem]
 
-                       NOC-cloudops-automate
-                                │
-                   ┌────────────┴────────────┐
-                   │                         │
-                   ▼                         ▼
-                Lambda                 SSM OpsCenter
-                   │                         │
-                   ▼                         ▼
-       Existing Automated Flow            OpsItem
+11) IAM Behavior
 
-The existing Lambda alarm action was not removed or replaced.
+The OpsCenter alarm action is separate from the Lambda execution role.
 
-The CloudWatch alarm now performs an additional Systems Manager OpsCenter action when it enters the ALARM state.
-
-9. IAM Behavior for the OpsCenter Alarm Action
-
-The OpsCenter alarm action is authorized through the AWS-managed CloudWatch service-linked role used for Systems Manager alarm actions.
-
-Conceptually:
+Conceptual flow
 
 CloudWatch Alarm
-      ↓
-AWS Service-Linked Role
-      ↓
+    ↓
+Service-linked role
+    ↓
 ssm:CreateOpsItem
-      ↓
+    ↓
 Systems Manager OpsCenter
 
-This is separate from:
+This does not replace:
 
-the Lambda execution role,
+Lambda execution role permissions
 
-the EC2 instance role,
+EC2 instance role permissions
 
-and the permissions Lambda uses to call Systems Manager Run Command.
+SSM Run Command permissions
 
-This separation keeps the existing remediation authorization model unchanged.
+12) Test Flow
 
-10. Testing Performed
+flowchart TD
+    A[HTTPD intentionally stopped] --> B[CloudWatch Agent publishes procstat]
+    B --> C[procstat_lookup_pid_count shows HTTPD down]
+    C --> D[NOC-cloudops-automate becomes ALARM]
+    D --> E[Lambda remediation path]
+    D --> F[OpsCenter creates OpsItem]
+    E --> G[HTTPD recovery verified]
+    F --> H[OpsItem Open]
+    G --> I[Engineer review]
+    H --> I
+    I --> J[OpsItem Resolved]
 
-The enhancement was tested using the existing P1 HTTPD failure workflow.
+13) Test Results
 
-Test Flow
-
-HTTPD intentionally stopped
-        ↓
-CloudWatch Agent publishes procstat data
-        ↓
-procstat_lookup_pid_count indicates HTTPD is down
-        ↓
-NOC-cloudops-automate enters ALARM
-        │
-        ├──────────────→ Lambda remediation continues
-        │
-        └──────────────→ OpsCenter creates OpsItem
-                              ↓
-                             Open
-        ↓
-HTTPD recovery verified
-        ↓
-OpsItem manually updated
-        ↓
-Resolved
-
-Test Results
-
-Test Requirement
+Test Item
 
 Result
 
-P1 HTTPD failure detected
+P1 detection worked
 
 ✅ Passed
 
-Existing direct CloudWatch → Lambda action remained active
+Lambda remediation remained active
 
 ✅ Passed
 
-OpsCenter alarm action created an OpsItem
+OpsCenter created OpsItem
 
 ✅ Passed
 
-OpsItem identified the CloudWatch alarm source
+OpsItem captured alarm source
 
 ✅ Passed
 
-Severity 1 was recorded
+Severity 1 recorded
 
 ✅ Passed
 
-Existing SSM Run Command remediation continued to work
+SSM remediation continued to work
 
 ✅ Passed
 
-HTTPD recovery was verified
+HTTPD recovery verified
 
 ✅ Passed
 
-OpsItem status could be manually managed
+OpsItem status updated manually
 
 ✅ Passed
 
-OpsItem was successfully marked Resolved
+OpsItem resolved successfully
 
 ✅ Passed
 
-11. Test Evidence
+14) Included Evidence
 
-The following screenshots are included in this folder as implementation evidence.
+The following screenshots are part of this folder:
 
-Architecture
+OPSCENTER ARCHITECTURE.png
 
+OPSCENTER-CW-action.png
 
+OPSCENTER-open-incidet.png
 
-CloudWatch OpsCenter Alarm Action
+OPSCENETR-inprogress-incident.png
 
+OPSCENTER-resolve-incident.png
 
+Example image links
 
-OpsItem — Open
+![OpsCenter Architecture](./OPSCENTER%20ARCHITECTURE.png)
+![CloudWatch OpsCenter Action](./OPSCENTER-CW-action.png)
+![Open OpsItem](./OPSCENTER-open-incidet.png)
+![In Progress OpsItem](./OPSCENETR-inprogress-incident.png)
+![Resolved OpsItem](./OPSCENTER-resolve-incident.png)
 
+15) Remediation vs Incident Tracking
 
-
-OpsItem — In Progress
-
-
-
-OpsItem — Resolved
-
-
-
-12. Remediation vs Operational Incident Tracking
-
-These responsibilities must not be confused.
-
-Remediation
-
-CloudWatch
-   ↓
-Lambda
-   ↓
-SSM Run Command
-   ↓
-EC2
-   ↓
-Recover HTTPD
-
-Purpose:
-
-Correct the supported technical failure.
-
-Operational Tracking
-
-CloudWatch
-   ↓
-SSM OpsCenter
-   ↓
-OpsItem
-   ↓
-Open / In Progress / Resolved
-
-Purpose:
-
-Create and maintain an operational record of the issue.
-
-Important: This enhancement uses Systems Manager OpsCenter. It does not implement AWS Systems Manager Incident Manager.
-
-13. Component Responsibilities
-
-Component
+Function
 
 Responsibility
 
-VPC
-
-Network boundary and connectivity
-
-EC2
-
-Hosts Amazon Linux and HTTPD
-
-CloudWatch Agent
-
-Publishes the P1 HTTPD procstat metric
-
 CloudWatch
-
-Evaluates metrics and detects alarm conditions
-
-Lambda
-
-Parses the alarm, validates the actionable condition, and orchestrates the P1/P2 workflow
-
-SSM Run Command
-
-Executes controlled commands on EC2
-
-SSM Agent
-
-Receives and executes Systems Manager commands on EC2
-
-SSM OpsCenter
-
-Creates and tracks OpsItems
-
-SNS
-
-Recovery notification and escalation
-
-IAM
-
-Controls authorization between AWS components
-
-CloudWatch Agent and SSM Agent are supporting agents, while OpsCenter and Run Command are capabilities of Systems Manager. They do not change the project's seven-primary-service count.
-
-14. Impact on the Reviewed V2.0 Architecture
-
-The reviewed remediation baseline remains:
-
-CloudWatch
-   ↓
-Lambda
-   ↓
-SSM Run Command
-   ↓
-EC2
-   ↓
-Verification
-   ↓
-SNS
-
-The post-review enhancement adds only this parallel path:
-
-CloudWatch
-   ↓
-SSM OpsCenter
-   ↓
-OpsItem
-
-Therefore:
-
-Reviewed V2.0 baseline
-        +
-Post-review OpsCenter enhancement
-
-rather than:
-
-Original architecture replaced by OpsCenter
-
-This distinction is intentional so the repository clearly separates the reviewed implementation from later learning and operational improvements.
-
-15. Current Limitations
-
-The current OpsCenter implementation intentionally keeps incident ownership and closure under human control.
-
-Current limitations include:
-
-OpsItem status changes are manual.
-
-Lambda does not currently update the OpsItem status.
-
-Lambda remediation results are not automatically linked back to a specific OpsItem.
-
-OpsItem ownership/assignment is manual.
-
-Incident response and resolution times are not automatically measured.
-
-The enhancement currently covers the supported P1 HTTPD incident path only.
-
-P2 remains diagnostic-only and is not part of this OpsCenter enhancement.
-
-16. Future Enhancement Possibilities
-
-Possible future improvements include:
-
-automatically resolving the corresponding OpsItem after verified P1 recovery,
-
-automatically changing the OpsItem to In Progress when automatic remediation fails,
-
-correlating the Lambda incident ID with the related OpsItem,
-
-assigning an incident owner,
-
-measuring incident response and resolution times,
-
-adding OpsCenter information to operational dashboards,
-
-generating incident reports,
-
-and extending OpsCenter tracking to additional supported incident types.
-
-These are future possibilities, not part of the current implementation.
-
-17. Key Learning
-
-The enhancement demonstrates an important operational distinction:
-
-Detection
-≠
-Remediation
-≠
-Incident Tracking
-
-In this project:
-
-CloudWatch
-= Detect
-
-Lambda
-= Decide / Orchestrate
-
-SSM Run Command
-= Execute
-
-systemd
-= Manage HTTPD on Linux
-
-SNS
-= Notify / Escalate
-
-SSM OpsCenter
-= Record / Track
-
-18. Conclusion
-
-The Systems Manager OpsCenter enhancement adds formal operational issue tracking to the existing CloudOps NOC Automation V2.0 project without replacing its reviewed remediation architecture.
-
-The reviewed baseline demonstrates:
 
 Detect
-   ↓
-Decide
-   ↓
-Remediate / Diagnose
-   ↓
-Verify
-   ↓
-Notify / Escalate
 
-The post-review OpsCenter enhancement adds:
+Lambda
 
-Record
-  ↓
-Track
-  ↓
-Resolve
+Decide / orchestrate
 
-Together, the project demonstrates both:
+SSM Run Command
 
-technical incident response and operational incident tracking
+Execute remediation
 
-while preserving the original CloudWatch → Lambda → Systems Manager Run Command architecture as the reviewed V2.0 baseline.
+systemd
+
+Manage HTTPD
+
+SNS
+
+Notify / escalate
+
+SSM OpsCenter
+
+Record / track incident
+
+Important distinction
+
+Remediation = fixing the technical issue
+
+OpsCenter = tracking the operational incident
+
+This enhancement uses Systems Manager OpsCenter, not Systems Manager Incident Manager.
+
+16) Current Limitations
+
+OpsItem status changes are manual
+
+Lambda does not automatically update the OpsItem
+
+Lambda recovery result is not automatically linked to an OpsItem
+
+OpsItem assignment is manual
+
+Incident timing metrics are not automated
+
+This enhancement applies to P1 HTTPD only
+
+P2 remains diagnostic-only
+
+17) Future Possibilities
+
+Possible future improvements:
+
+automatic OpsItem resolution after successful verified recovery
+
+automatic move to In Progress on recovery failure
+
+linking Lambda incident data to the OpsItem
+
+assigning an incident owner
+
+adding response / resolution metrics
+
+dashboard integration
+
+incident reporting
+
+18) Conclusion
+
+This enhancement improves the project by adding formal operational incident tracking while preserving the original reviewed V2.0 architecture.
+
+Final idea
+
+Reviewed baseline
+
+CloudWatch → Lambda → SSM Run Command → EC2 → Verification → SNS
+
+Post-review enhancement
+
+CloudWatch → SSM OpsCenter → OpsItem
+
+So the project now demonstrates both:
+
+technical incident response
+
+operational incident tracking
