@@ -1,4 +1,4 @@
-#!/bin/bash
+
 set -Eeuo pipefail
 
 # CloudOps NOC V2.0
